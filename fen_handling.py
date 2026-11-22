@@ -1,171 +1,138 @@
+from dataclasses import dataclass
+
 import numpy as np
 
+from notation_handling import decode_square, encode_square
 
-# Creates an exception for when an invalid FEN is detected
+PIECES = "pnbrqk"
+CASTLING = {"K": 8, "Q": 4, "k": 2, "q": 1}
+
+
 class InvalidFEN(Exception):
     def __init__(self, fen):
         self.message = f'"{fen}" is an invalid FEN'
         super().__init__(self.message)
 
 
-def fen_to_bitboards(fen):
-    try:
-        # Mapping of FEN piece abbreviations to piece types
-        piece_mapping = {"p": 0, "n": 1, "b": 2, "r": 3, "q": 4, "k": 5}
-        # Mapping of castle options to bitboard
-        castling_mapping = {"K": 0b1000, "Q": 0b0100, "k": 0b0010, "q": 0b0001}
+@dataclass(frozen=True)
+class FenPosition:
+    piece_boards: tuple[int, ...]
+    white_to_move: bool
+    castling_rights: int
+    en_passant: int | None
+    halfmove_clock: int
+    fullmove_number: int
 
-        # Initialize bitboards for each piece type, all white pieces, and all black pieces
-        bitboards = [np.uint64(0)] * 6
-        white_pieces = np.uint64(0)
-        black_pieces = np.uint64(0)
-        castling_rights = 0b0000  # 4-bit integer for castling rights
-        en_passant_square = np.uint(0)
+    def to_fen(self) -> str:
+        placement = _format_placement(self.piece_boards)
+        turn = "w" if self.white_to_move else "b"
+        rights = _format_castling(self.castling_rights)
+        target = "-" if self.en_passant is None else encode_square(self.en_passant)
+        return (
+            f"{placement} {turn} {rights} {target} "
+            f"{self.halfmove_clock} {self.fullmove_number}"
+        )
 
-        # Extract the piece placement part of the FEN
-        piece_placement = fen.split()[0]
 
-        # Loop through each rank and file
-        for rank, fen_rank in enumerate(reversed(piece_placement.split("/"))):
-            file_index = 0
-
-            # Loop through each character in the FEN rank
-            for char in fen_rank:
-                if char.isdigit():
-                    # Skip empty squares
-                    file_index += int(char)
-                else:
-                    # Map the FEN piece abbreviation to the corresponding piece type
-                    piece_type = piece_mapping[char.lower()]
-
-                    # Set the corresponding bit in the bitboard
-                    bitboards[piece_type] |= np.uint64(1) << np.uint64(
-                        rank * 8 + file_index
-                    )
-
-                    # Set the bit in the all white or all black pieces bitboards
-                    if char.isupper():  # White piece
-                        white_pieces |= np.uint64(1) << np.uint64(rank * 8 + file_index)
-                    else:  # Black piece
-                        black_pieces |= np.uint64(1) << np.uint64(rank * 8 + file_index)
-
-                    file_index += 1
-
-        # Process castling rights
-        castling_fen = fen.split()[2]
-        for char in castling_fen:
-            castling_rights |= castling_mapping.get(char, 0)
-
-        # Process en passant target square
-        en_passant_fen = fen.split()[3]
-        if en_passant_fen != "-":
-            en_passant_file = ord(en_passant_fen[0]) - ord("a")
-            en_passant_rank = 8 - int(en_passant_fen[1])
-            en_passant_square = en_passant_rank * 8 + en_passant_file
-
-        # Add all white pieces, all black pieces, castling rights, and en passant target bitboards to the array
-        bitboards.extend(
-            [
-                white_pieces,
-                black_pieces,
-                np.uint64(castling_rights),
-                np.uint64(en_passant_square),
-            ]
-        )  # Appends the remaining bitboards to the array of all bitboards
-        return bitboards
-    except:
+def parse_fen(fen: str) -> FenPosition:
+    """Parse standard six-field FEN syntax without judging position legality."""
+    fields = fen.split()
+    if len(fields) != 6:
         raise InvalidFEN(fen)
+    placement, turn, rights, target, halfmove, fullmove = fields
+    ranks = placement.split("/")
+    if len(ranks) != 8 or turn not in ("w", "b"):
+        raise InvalidFEN(fen)
+
+    boards = [0] * 8
+    for rank, row in enumerate(reversed(ranks)):
+        file = 0
+        previous_was_digit = False
+        for char in row:
+            if char in "12345678" and not previous_was_digit:
+                file += int(char)
+                previous_was_digit = True
+            elif char in PIECES + PIECES.upper() and file < 8:
+                mask = 1 << (rank * 8 + file)
+                boards[PIECES.index(char.lower())] |= mask
+                boards[6 if char.isupper() else 7] |= mask
+                file += 1
+                previous_was_digit = False
+            else:
+                raise InvalidFEN(fen)
+        if file != 8:
+            raise InvalidFEN(fen)
+
+    castling = 0
+    if rights != "-":
+        for char in rights:
+            mask = CASTLING.get(char, 0)
+            if not mask or castling & mask:
+                raise InvalidFEN(fen)
+            castling |= mask
+
+    en_passant = None
+    if target != "-":
+        expected_rank = "6" if turn == "w" else "3"
+        if len(target) != 2 or target[0] not in "abcdefgh" or target[1] != expected_rank:
+            raise InvalidFEN(fen)
+        en_passant = decode_square(target)
+
+    if any(not clock.isascii() or not clock.isdecimal() for clock in (halfmove, fullmove)):
+        raise InvalidFEN(fen)
+    try:
+        halfmove_clock, fullmove_number = int(halfmove), int(fullmove)
+    except ValueError as exc:
+        raise InvalidFEN(fen) from exc
+    if fullmove_number < 1:
+        raise InvalidFEN(fen)
+
+    return FenPosition(
+        tuple(boards), turn == "w", castling, en_passant, halfmove_clock, fullmove_number
+    )
+
+
+def fen_to_bitboards(fen):
+    """Adapt complete FEN state to the prototype board's NumPy layout."""
+    position = parse_fen(fen)
+    return [
+        np.uint64(value)
+        for value in (*position.piece_boards, position.castling_rights, position.en_passant or 0)
+    ]
+
+
+def _format_placement(boards):
+    ranks = []
+    for rank in range(7, -1, -1):
+        row = []
+        empty = 0
+        for file in range(8):
+            mask = 1 << (rank * 8 + file)
+            if not (boards[6] | boards[7]) & mask:
+                empty += 1
+                continue
+            if empty:
+                row.append(str(empty))
+                empty = 0
+            piece = next(PIECES[index] for index in range(6) if boards[index] & mask)
+            row.append(piece.upper() if boards[6] & mask else piece)
+        if empty:
+            row.append(str(empty))
+        ranks.append("".join(row))
+    return "/".join(ranks)
+
+
+def _format_castling(rights):
+    return "".join(char for char, mask in CASTLING.items() if rights & mask) or "-"
 
 
 def bitboards_to_fen(bitboards):
-    # Mapping of piece types to FEN abbreviations
-    piece_mapping = {0: "p", 1: "n", 2: "b", 3: "r", 4: "q", 5: "k"}
-
-    # Extract bitboards for each piece type, all white pieces, all black pieces, castling rights, and en passant target
-    (
-        pawn_board,
-        knight_board,
-        bishop_board,
-        rook_board,
-        queen_board,
-        king_board,
-        white_pieces_board,
-        black_pieces_board,
-        castling_rights,
-        en_passant_target,
-    ) = bitboards  # Assigns each bitboard to a variable with a more aptly suited name
-
-    # Convert bitboards to FEN piece placement
-    piece_placement = ""
-    for rank in range(7, -1, -1):  # Loop through ranks in reverse order
-        empty_count = 0  # Count consecutive empty squares
-        for file in range(8):
-            square = rank * 8 + file
-            piece = next(
-                (
-                    piece_mapping[piece_type]
-                    for piece_type, piece_board in enumerate(
-                        [
-                            pawn_board,
-                            knight_board,
-                            bishop_board,
-                            rook_board,
-                            queen_board,
-                            king_board,
-                        ]
-                    )
-                    if (
-                        piece_board & np.uint64(1) << np.uint64(square)
-                    )  # If there is a piece on the square in the bitboard that is being searched, assign that piece to piece
-                ),
-                None,
-            )
-            if piece is not None:
-                # Piece found, append empty count and piece to FEN
-                if empty_count > 0:
-                    piece_placement += str(empty_count)
-                    empty_count = 0
-
-                if white_pieces_board & np.uint64(1) << np.uint64(
-                    square
-                ):  # If the piece is a white piece, then add the uppercase version of the character
-                    piece_placement += piece.upper()
-                else:  # If not white, then it must be black so add the lowercase character
-                    piece_placement += piece
-            else:
-                # Empty square, increase empty count
-                empty_count += 1
-
-        if empty_count > 0:
-            # Append remaining empty count for the rank
-            piece_placement += str(empty_count)
-
-        if rank > 0:
-            # Separate ranks with '/'
-            piece_placement += "/"
-
-    # Determine active color
-    active_color = "w" if white_pieces_board != 0 else "b"
-
-    # Determine castling rights in FEN
-    castling_fen = ""
-    if castling_rights & np.uint64(0b1000):  # Determines if white can castle kingside
-        castling_fen += "K"
-    if castling_rights & np.uint64(0b0100):  # Determines if white can castle queenside
-        castling_fen += "Q"
-    if castling_rights & np.uint64(0b0010):  # Determines if black can castle kingside
-        castling_fen += "k"
-    if castling_rights & np.uint64(0b0001):  # Determines if black can castle queenside
-        castling_fen += "q"
-
-    # Determine en passant target square in FEN
-    en_passant_fen = (
-        "-"
-        if en_passant_target == 0
-        else f"{chr((int(en_passant_target) % 8) + ord('a'))}{8 - (en_passant_target // 8)}"
-    )
-
-    return f"{piece_placement} {active_color} {castling_fen} {en_passant_fen} 0 1"
+    """Format the prototype layout for display with default turn and clocks."""
+    *boards, rights, target = map(int, bitboards)
+    # The prototype rotates every slot, including the en passant index.
+    en_passant = target if 0 < target < 64 else None
+    position = FenPosition(tuple(boards), True, rights, en_passant, 0, 1)
+    return position.to_fen()
 
 
 def display_chess_position(fen):
