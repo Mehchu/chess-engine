@@ -206,3 +206,18 @@ rnbq1rk1/ppp2pbp/3p1np1/4p3/2PPP3/2N2N2/PP2BPPP/R1BQK2R w KQ - 0 7
 - Added checker and pin masks and first-blocker captures for sliders. The fast generator matched the reference across 2,388 seeded positions, including tactical moves and FENs. Starting-position depth-five perft returned 4,865,609.
 - Across three runs, median starting-position perft time fell from 487 to 292 ms, and Kiwipete perft fell from 183 to 99 ms. Median uncached depth-three quiescence search fell from 34 to 33 ms and from 383 to 356 ms, respectively. Cached starting-position search rose from 48 to 49 ms; cached Kiwipete fell from 414 to 396 ms.
 - Capped the table at 32,768 entries with FIFO replacement and retained exact-depth and history checks. Slotted undo snapshots reduced the median shallow object footprint from 168 to 80 bytes on CPython 3.14.8, excluding referenced bitboards. For cached Kiwipete depth three, profiled key construction used 4.2% of execution time and snapshots plus restores used 2.6%. Incremental hashing and delta undo remain deferred pending evidence from deeper searches.
+
+### Stockfish reference retest after search and move-generation changes
+
+- Retested commit `5e5f1f8` against the same Stockfish 17.1 binary and the same 12 starting positions. Both engines had 100 ms per move, colours were swapped, and the cap remained 120 plies.
+
+| Opponent setting and suite | Wins | Draws | Losses | Unfinished | Complete pairs |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 1320, default positions | 7 | 0 | 2 | 7 | 2 |
+| 1320, opening positions | 7 | 0 | 0 | 1 | 3 |
+| 1320, combined | 14 | 0 | 2 | 8 | 5 |
+| 1700, opening positions | 2 | 0 | 1 | 5 | 1 |
+
+- The repeat scored 9/10 in complete pairs, a nominal 1702 versus the earlier 5.5/10 and 1355. Only two starting positions had both games finish in both runs. Each moved from a split pair to two wins. Across all 24 games, assigning all unfinished games losses or wins gives nominal endpoints of 1378 and 1737. These endpoints reflect the ply cap. They do not include sampling or calibration uncertainty.
+
+- The Stockfish 1700 check used the same four opening positions and time limit. Only one pair completed, so the result cannot validate the 1702 point estimate at the higher setting.
