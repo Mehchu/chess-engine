@@ -7,7 +7,7 @@ A Python chess-engine prototype exploring bitboard representations, game-tree se
 - 64-square integer bitboards for piece placement and occupancy.
 - Move generation for all six piece types, including promotion candidates.
 - FEN position parsing and terminal board visualisation.
-- Negamax and alpha–beta search with an optional transposition table.
+- Negamax and alpha–beta search with an optional transposition table and quiescence search in the CLI and UCI.
 - Material and piece-square evaluation with phase-dependent king and passed-pawn terms and a bishop-pair bonus.
 - Deterministic Zobrist position hashing and depth-qualified cache bounds.
 - Interactive command-line interface, fixed-depth and clock-managed UCI mode, and reproducible benchmarks.

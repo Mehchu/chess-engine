@@ -22,7 +22,7 @@ def _parse_position(tokens):
         board = ChessBoard(STARTING_FEN)
         rest = tokens[1:]
     elif tokens[:1] == ["fen"] and len(tokens) >= 7:
-        board = ChessBoard(" ".join(tokens[1:7]))
+        board = ChessBoard.from_playable_fen(" ".join(tokens[1:7]))
         rest = tokens[7:]
     else:
         raise ValueError("Expected position startpos or position fen <six fields>")
@@ -118,7 +118,8 @@ class UciEngine:
         try:
             for depth in depths:
                 move, score = negamax_alpha_beta_top(
-                    board, depth, table=table, control=control
+                    board, depth, table=table, control=control, quiescence=True,
+                    preferred_move=best_move if depth > 1 else None
                 )
                 if move not in moves:
                     raise RuntimeError(f"Search returned an illegal root move: {move}")

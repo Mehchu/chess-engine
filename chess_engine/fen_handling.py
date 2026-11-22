@@ -10,12 +10,14 @@ CASTLING = {"K": 8, "Q": 4, "k": 2, "q": 1}
 
 
 class InvalidFEN(Exception):
-    def __init__(self, fen):
+    def __init__(self, fen, reason=None):
         self.message = f'"{fen}" is an invalid FEN'
+        if reason:
+            self.message += f" ({reason})"
         super().__init__(self.message)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class FenPosition:
     piece_boards: tuple[int, ...]
     white_to_move: bool

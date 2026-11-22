@@ -187,6 +187,15 @@ class UciTests(unittest.TestCase):
         self.send("go depth 2")
         self.assert_best_move(chess.Board(fen))
 
+    def test_depth_one_sees_a_recapture_with_quiescence(self):
+        fen = "4k3/8/4p3/3r4/8/8/8/3QK3 w - - 0 1"
+        self.send(f"position fen {fen}")
+        self.send("go depth 1")
+        command, move = self.receive_best_move().split()
+        self.assertEqual(command, "bestmove")
+        self.assertIn(chess.Move.from_uci(move), chess.Board(fen).legal_moves)
+        self.assertNotEqual(move, "d1d5")
+
     def test_infinite_analysis_stops_with_one_legal_move(self):
         self.send("go infinite")
         self.assertTrue(self.receive().startswith("info depth 1 "))

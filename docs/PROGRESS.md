@@ -189,3 +189,12 @@ rnbqkb1r/1p3ppp/p2p1n2/4p3/3NP3/2N5/PPP1BPPP/R1BQK2R w KQkq - 0 7
 rnbq1rk1/ppp1bpp1/4pn1p/3p2B1/2PP4/2N1PN2/PP3PPP/R2QKB1R w KQ - 0 7
 rnbq1rk1/ppp2pbp/3p1np1/4p3/2PPP3/2N2N2/PP2BPPP/R1BQK2R w KQ - 0 7
 ```
+
+### Quiescence search and engine review
+
+- Enabled quiescence in the CLI and UCI. It generates captures and promotions directly and searches legal evasions when checked. Tactical moves are ordered in both the main search and its extensions. The search honours cancellation and caps the extension at six plies. Static-leaf and quiescence scores use separate table keys.
+- In the regression position, static depth-one search picks `d1d5` and scores it +7.84. Quiescence sees the pawn recapture and instead plays `d1a4` at +2.44. The suite also covers promotions, en passant, quiet check evasions, terminal scores, cancellation, and the extension cap.
+- Three benchmark runs preserved both perft counts. Median uncached depth-three time rose from 21 to 35 ms on the starting position and from 147 to 384 ms on Kiwipete. Cached and uncached scores agreed within both leaf-search modes.
+- In a 20 ms colour-swapped check against the pre-change engine at `d9d0ace`, quiescence won seven games, drew one, and lost none. Eight reached the cap and only two pairs completed both games. Median completed depth was two with quiescence and three without it. The sample shows the tactical and speed trade-off and is too small for a dependable strength estimate.
+- Reviewed the engine, interfaces, and development tools. The [roadmap](ROADMAP.md#12-quiescence-search-and-engine-review) records the next priorities, including playable FEN validation, insufficient-material draws, principal-move ordering, pin-aware move generation, and bounded cache memory.
+- Suggested commit `feat: extend tactical leaves with quiescence search`.

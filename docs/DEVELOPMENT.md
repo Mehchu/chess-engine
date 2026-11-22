@@ -37,7 +37,9 @@ Perft counts leaf positions. Search counts visited nodes, including
 transposition-table hits. Compare repeated runs on the same machine and
 check node counts and scores alongside elapsed time. The summary reports
 median elapsed time and median nodes per second, and the report keeps every
-individual run.
+individual run. Run `python -m benchmark --quiescence` to measure the
+capture, promotion, and check-evasion search used by the CLI and UCI.
+The default report retains static leaves for comparison with older runs.
 
 ### Relative playing strength
 

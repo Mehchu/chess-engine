@@ -1,7 +1,7 @@
 from enum import Enum
 from itertools import islice
 
-from .fen_handling import CASTLING, FenPosition, display_chess_position, parse_fen
+from .fen_handling import CASTLING, FenPosition, InvalidFEN, display_chess_position, parse_fen
 from .notation_handling import decompose_notation, encode_square
 
 WHITE, BLACK = 6, 7
@@ -27,6 +27,8 @@ class PieceType(Enum):
 
 PAWN, KNIGHT, BISHOP, ROOK, QUEEN, KING = (piece.value for piece in PieceType)
 PROMOTIONS = "qrbn"
+BACK_RANKS = 0xFF000000000000FF
+DARK_SQUARES = 0xAA55AA55AA55AA55
 Move = tuple[int, int, str | None]
 
 
@@ -77,8 +79,12 @@ RAY_MASKS = {
     directions: tuple(tuple((_square_mask(ray), dx + 8 * dy > 0)
                             for ray, (dx, dy) in zip(rays, directions))
                       for rays in RAY_SQUARES[directions])
-    for directions in (ORTHOGONAL, DIAGONAL)
+    for directions in (ORTHOGONAL, DIAGONAL, KING_STEPS)
 }
+
+
+def _first_blocker(blockers, ascending):
+    return blockers & -blockers if ascending else 1 << (blockers.bit_length() - 1)
 
 
 def _castle_rook_mask(start, end):
@@ -102,6 +108,54 @@ class ChessBoard:
     def __init__(self, fen):
         self._restore(parse_fen(fen))
         self.previous_positions = []
+
+    @classmethod
+    def from_playable_fen(cls, fen):
+        """Load a standard position for interactive play."""
+        board = cls(fen)
+        reason = board._playability_error()
+        if reason is not None:
+            raise InvalidFEN(fen, reason)
+        return board
+
+    def _playability_error(self):
+        boards = self._boards
+        kings = boards[KING]
+        if any((kings & boards[side]).bit_count() != 1 for side in (WHITE, BLACK)):
+            return "expected one king per side"
+        pawns = boards[PAWN]
+        if pawns & BACK_RANKS:
+            return "pawn on a back rank"
+        for side, home in ((WHITE, 4), (BLACK, 60)):
+            pieces = boards[side]
+            pawn_count = (pawns & pieces).bit_count()
+            if pawn_count > 8 or pieces.bit_count() > 16:
+                return "too many pieces or pawns for one side"
+            promotions = sum(
+                max(0, (boards[piece] & pieces).bit_count() - initial)
+                for piece, initial in ((KNIGHT, 2), (BISHOP, 2), (ROOK, 2), (QUEEN, 1))
+            )
+            if promotions > 8 - pawn_count:
+                return "extra pieces exceed available pawn promotions"
+            if self.castling_rights & KING_RIGHTS[side] and not kings & pieces & (1 << home):
+                return "castling rights require a king on its home square"
+            for rook in (home - 4, home + 3):
+                if self.castling_rights & ROOK_RIGHTS[rook] and not boards[ROOK] & pieces & (1 << rook):
+                    return "castling rights require a rook on its home square"
+
+        side, enemy = (WHITE, BLACK) if self.white_to_move else (BLACK, WHITE)
+        other_king = (kings & boards[enemy]).bit_length() - 1
+        if self._attacked(other_king, side, self.occupancy):
+            return "the side that just moved is in check"
+
+        if self.en_passant is not None:
+            step = 8 if self.white_to_move else -8
+            target, origin = self.en_passant, self.en_passant + step
+            passed_pawn = 1 << (target - step)
+            if (self.occupancy & ((1 << target) | (1 << origin))
+                    or not passed_pawn & pawns & boards[enemy]):
+                return "en passant target is inconsistent with a double pawn move"
+        return None
 
     def _restore(self, position):
         self._boards = list(position.piece_boards)
@@ -218,6 +272,14 @@ class ChessBoard:
                 if occupied & (1 << target):
                     break
 
+    def _ray_captures(self, square, directions, targets):
+        occupied = self.occupancy
+        for ray, ascending in RAY_MASKS[directions][square]:
+            if ray & targets:
+                blocker = _first_blocker(ray & occupied, ascending)
+                if blocker & targets:
+                    yield blocker.bit_length() - 1
+
     def _attacked(self, square, attacker, occupied, removed=0):
         boards = self._boards
         attackers = boards[attacker] & ~removed
@@ -236,7 +298,7 @@ class ChessBoard:
                     continue
                 blockers = ray & occupied
                 # A slider on the ray guarantees at least one occupied square.
-                first = blockers & -blockers if ascending else 1 << (blockers.bit_length() - 1)
+                first = _first_blocker(blockers, ascending)
                 if first & sliders:
                     return True
         return False
@@ -246,13 +308,15 @@ class ChessBoard:
         king = self._boards[KING] & self._boards[side]
         return bool(king and self._attacked(king.bit_length() - 1, enemy, self.occupancy))
 
-    def _pawn_targets(self, square, side, enemy):
+    def _pawn_targets(self, square, side, enemy, tactical_only):
         direction = 1 if side == WHITE else -1
         first_rank = 1 if side == WHITE else 6
         last_rank = 7 if side == WHITE else 0
         targets = []
         advance = _offset(square, 0, direction)
-        if advance is not None and not self.occupancy & (1 << advance):
+        if (advance is not None
+                and (not tactical_only or advance // 8 == last_rank)
+                and not self.occupancy & (1 << advance)):
             targets.append(advance)
             double = advance + 8 * direction
             if square // 8 == first_rank and not self.occupancy & (1 << double):
@@ -286,26 +350,29 @@ class ChessBoard:
             if not self._attacked(home + step, enemy, self.occupancy):
                 yield home, home + 2 * step, None
 
-    def _candidates(self, side, enemy):
-        excluded = self._boards[side] | (self._boards[enemy] & self._boards[KING])
+    def _candidates(self, side, enemy, *, tactical_only=False):
+        enemy_king = self._boards[enemy] & self._boards[KING]
+        allowed = (self._boards[enemy] if tactical_only else ~self._boards[side]) & ~enemy_king
         for square in _squares(self._boards[side]):
             piece = self._piece_type(1 << square)
             if piece == PAWN:
-                yield from self._pawn_targets(square, side, enemy)
+                yield from self._pawn_targets(square, side, enemy, tactical_only)
                 continue
             if piece == KNIGHT:
                 targets = KNIGHT_TARGETS[square]
             elif piece == KING:
                 targets = KING_TARGETS[square]
-                yield from self._castle_moves(square, side, enemy)
-            elif piece == BISHOP:
-                targets = self._rays(square, DIAGONAL)
-            elif piece == ROOK:
-                targets = self._rays(square, ORTHOGONAL)
+                if not tactical_only:
+                    yield from self._castle_moves(square, side, enemy)
             else:
-                targets = self._rays(square, KING_STEPS)
+                directions = (DIAGONAL if piece == BISHOP else
+                              ORTHOGONAL if piece == ROOK else KING_STEPS)
+                if tactical_only:
+                    targets = self._ray_captures(square, directions, allowed)
+                else:
+                    targets = self._rays(square, directions)
             for target in targets:
-                if not excluded & (1 << target):
+                if allowed & (1 << target):
                     yield square, target, None
 
     def _keeps_king_safe(self, move, side, enemy):
@@ -325,11 +392,83 @@ class ChessBoard:
                 occupied ^= _castle_rook_mask(start, end)
         return not self._attacked(king.bit_length() - 1, enemy, occupied, captured)
 
-    def _legal_moves(self):
+    def _king_constraints(self, king_square, side, enemy):
+        boards = self._boards
+        own, opponents = boards[side], boards[enemy]
+        occupied = own | opponents
+        checkers = opponents & ((boards[PAWN] & PAWN_SOURCES[enemy][king_square])
+                                | (boards[KNIGHT] & KNIGHT_ATTACKS[king_square])
+                                | (boards[KING] & KING_ATTACKS[king_square]))
+        evasion = checkers
+        pins = {}
+        for piece, directions in ((ROOK, ORTHOGONAL), (BISHOP, DIAGONAL)):
+            sliders = opponents & (boards[piece] | boards[QUEEN])
+            if not sliders:
+                continue
+            rays = RAY_MASKS[directions]
+            for index, (ray, ascending) in enumerate(rays[king_square]):
+                if not ray & sliders:
+                    continue
+                blockers = ray & occupied
+                first = _first_blocker(blockers, ascending)
+                if first & sliders:
+                    checkers |= first
+                    evasion |= ray & ~rays[first.bit_length() - 1][index][0]
+                elif first & own:
+                    beyond = blockers ^ first
+                    if beyond:
+                        second = _first_blocker(beyond, ascending)
+                        if second & sliders:
+                            pins[first.bit_length() - 1] = ray & ~rays[second.bit_length() - 1][index][0]
+        if checkers & (checkers - 1):
+            evasion = 0
+        return (evasion if checkers else None), pins
+
+    def _legal_moves(self, *, tactical_only=False):
         side, enemy = (WHITE, BLACK) if self.white_to_move else (BLACK, WHITE)
-        for move in self._candidates(side, enemy):
-            if self._keeps_king_safe(move, side, enemy):
+        moves = self._candidates(side, enemy, tactical_only=tactical_only)
+        king = self._boards[KING] & self._boards[side]
+        if king.bit_count() != 1:
+            for move in moves:
+                if self._keeps_king_safe(move, side, enemy):
+                    yield move
+            return
+
+        king_square = king.bit_length() - 1
+        evasion, pins = self._king_constraints(king_square, side, enemy)
+        for move in moves:
+            start, end, _ = move
+            # En passant changes occupancy at three squares, so give it the
+            # full safety check even under multiple checks or an apparent pin.
+            if start == king_square or (end == self.en_passant and self._boards[PAWN] & (1 << start)):
+                if self._keeps_king_safe(move, side, enemy):
+                    yield move
+                continue
+
+            pin = pins.get(start)
+            target = 1 << end
+            if ((evasion is not None and not evasion & target)
+                    or (pin is not None and not pin & target)):
+                continue
+            if (evasion is None and pin is None) or self._keeps_king_safe(move, side, enemy):
                 yield move
+
+    def _tactical_priority(self, move):
+        """Order captures by victim value first, then attacker value."""
+        start, end, promotion = move
+        start_mask, end_mask = 1 << start, 1 << end
+        if not (self.occupancy & end_mask or promotion or end == self.en_passant):
+            return 0
+        side = WHITE if self.white_to_move else BLACK
+        attacker = self._piece_type(start_mask)
+        captured = self._piece_type(self._capture_mask(end, end_mask, attacker == PAWN, side))
+        if captured is None and promotion is None:
+            return 0
+        values = (1, 3, 3, 5, 9, 20)
+        gain = values[captured] if captured is not None else 0
+        if promotion:
+            gain += values[PieceType[promotion.upper()].value] - values[PAWN]
+        return 32 * gain - values[attacker]
 
     def generate_legal_moves(self):
         return [move_to_uci(move) for move in self._legal_moves()]
@@ -407,8 +546,21 @@ class ChessBoard:
                     self.undo_move()
         return False
 
+    def is_insufficient_material(self):
+        """Recognise basic dead positions from the remaining material."""
+        pawns, knights, bishops, rooks, queens, kings, _, _ = self._boards
+        if pawns or rooks or queens:
+            return False
+        if kings.bit_count() != 2:
+            return False
+        if (knights | bishops).bit_count() <= 1:
+            return True
+        return not knights and (not bishops & DARK_SQUARES or not bishops & ~DARK_SQUARES)
+
     def automatic_draw_reason(self):
-        """Return a repetition or move-count draw for a position with legal moves."""
+        """Return an automatic draw reason for a position with legal moves."""
+        if self.is_insufficient_material():
+            return "insufficient material"
         if self.halfmove_clock >= 150:
             return "seventy-five-move rule"
         if self._is_repetition(5):

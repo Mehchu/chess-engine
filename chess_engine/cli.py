@@ -18,7 +18,7 @@ def main():
         if len(customFEN) == 0:
             customFEN = STARTING_FEN
         try:
-            board = ChessBoard(
+            board = ChessBoard.from_playable_fen(
                 customFEN
             )  # Creating a ChessBoard object with the specified FEN
             break
@@ -64,7 +64,9 @@ def playGame(board: ChessBoard):
             return
 
         timer.start()
-        move, score = negamax_alpha_beta_top(board, depth, table=TranspositionTable())
+        move, score = negamax_alpha_beta_top(
+            board, depth, table=TranspositionTable(), quiescence=True
+        )
         timer.stop()
         print(f"The evaluation is {-score / 100}")
         board.make_move(move)

@@ -1,3 +1,4 @@
+from collections import OrderedDict
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum, auto
@@ -6,9 +7,11 @@ from random import Random
 
 from .board_representation import Move, move_to_uci
 from .evaluation_functions import EvaluationFunction
+from .notation_handling import decompose_notation
 
 MATE_SCORE = 100_000
 MATE_THRESHOLD = 90_000
+MAX_QUIESCENCE_PLIES = 6
 eval = EvaluationFunction()
 
 
@@ -74,27 +77,36 @@ class TranspositionEntry:
 
 
 class TranspositionTable:
-    """Cache entries for one evaluation and draw policy at fixed search depths."""
+    """Bound the number of exact-depth cache entries with FIFO eviction."""
 
-    def __init__(self):
+    def __init__(self, max_entries=32_768):
+        if not isinstance(max_entries, int) or max_entries < 1:
+            raise ValueError("The table requires at least one entry")
+        self._max_entries = max_entries
         self._hasher = ZobristHash()
-        self._entries = {}
+        self._entries = OrderedDict()
 
-    def key_for(self, board):
+    def __len__(self):
+        return len(self._entries)
+
+    def key_for(self, board, *, quiescence=False):
         # Raw history is conservative: equivalent en passant targets may miss
         # a hit, but positions with different repetition histories cannot share it.
         history = tuple(
             (position.piece_boards, position.white_to_move, position.en_passant)
             for position in board.reversible_history()
         )
-        return self._hasher.generate_key(board), board.halfmove_clock, history
+        return self._hasher.generate_key(board), board.halfmove_clock, history, quiescence
 
     def lookup(self, key, depth):
         # Different horizons can yield different fixed-depth scores.
         return self._entries.get((key, depth))
 
     def store(self, key, depth, entry):
-        self._entries[key, depth] = entry
+        slot = key, depth
+        if slot not in self._entries and len(self._entries) >= self._max_entries:
+            self._entries.popitem(last=False)
+        self._entries[slot] = entry
 
 
 def _adjust_mate_score(score, ply_offset):
@@ -149,29 +161,38 @@ def _negamax(board, depth, ply):
 
 
 def negamax_alpha_beta_top(
-    board, depth, alpha=-float("inf"), beta=float("inf"), *, table=None, control=None
+    board, depth, alpha=-float("inf"), beta=float("inf"), *, table=None, control=None,
+    quiescence=False, preferred_move=None
 ):
-    """Return a move and side-to-move score, or a bound outside the window."""
+    """Return a move and side-to-move score, or a bound outside the window.
+
+    Enable quiescence to extend leaves with captures, promotions and check evasions.
+    """
     if depth < 0:
         raise ValueError("Search depth must be non-negative")
     if not alpha < beta:
         raise ValueError("Alpha must be less than beta")
-    move, score = _alpha_beta(board, depth, alpha, beta, 0, table, control)
+    preferred = decompose_notation(preferred_move) if preferred_move is not None else None
+    move, score = _alpha_beta(board, depth, alpha, beta, 0, table, control, quiescence, preferred)
     return (move_to_uci(move) if move is not None else None), score
 
 
-def negamax_alpha_beta(board, depth, alpha=-float("inf"), beta=float("inf"), *, table=None):
+def negamax_alpha_beta(
+    board, depth, alpha=-float("inf"), beta=float("inf"), *, table=None, quiescence=False
+):
     """Return just the root score or bound."""
-    return negamax_alpha_beta_top(board, depth, alpha, beta, table=table)[1]
+    return negamax_alpha_beta_top(
+        board, depth, alpha, beta, table=table, quiescence=quiescence
+    )[1]
 
 
-def _alpha_beta(board, depth, alpha, beta, ply, table, control):
+def _alpha_beta(board, depth, alpha, beta, ply, table, control, quiescence, preferred=None):
     if control is not None:
         control.visit()
     if table is None:
-        return _search_node(board, depth, alpha, beta, ply, table, control)
+        return _search_node(board, depth, alpha, beta, ply, table, control, quiescence, preferred)
 
-    key = table.key_for(board)
+    key = table.key_for(board, quiescence=quiescence)
     entry = table.lookup(key, depth)
     if entry is not None:
         score = _adjust_mate_score(entry.score, -ply)
@@ -180,7 +201,7 @@ def _alpha_beta(board, depth, alpha, beta, ply, table, control):
                 or (entry.bound is Bound.UPPER and score <= alpha)):
             return entry.move, score
 
-    move, score = _search_node(board, depth, alpha, beta, ply, table, control)
+    move, score = _search_node(board, depth, alpha, beta, ply, table, control, quiescence, preferred)
     if score <= alpha:
         bound = Bound.UPPER
     elif score >= beta:
@@ -191,17 +212,28 @@ def _alpha_beta(board, depth, alpha, beta, ply, table, control):
     return move, score
 
 
-def _search_node(board, depth, alpha, beta, ply, table, control):
+def _search_node(board, depth, alpha, beta, ply, table, control, quiescence, preferred):
+    if depth == 0 and quiescence:
+        return None, _quiescence(board, alpha, beta, ply, control)
+
     moves, score = _moves_or_score(board, depth, ply)
     if score is not None:
         return None, score
+
+    if preferred is not None:
+        def priority(move):
+            return move == preferred, board._tactical_priority(move) if quiescence else 0
+
+        moves = sorted(moves, key=priority, reverse=True)
+    elif quiescence:
+        moves = sorted(moves, key=board._tactical_priority, reverse=True)
 
     best_move, best_score = None, -float("inf")
     for move in moves:
         board._push(move)
         try:
             _, child_score = _alpha_beta(
-                board, depth - 1, -beta, -alpha, ply + 1, table, control
+                board, depth - 1, -beta, -alpha, ply + 1, table, control, quiescence
             )
         finally:
             board.undo_move()
@@ -213,6 +245,41 @@ def _search_node(board, depth, alpha, beta, ply, table, control):
         if alpha >= beta:
             break
     return best_move, best_score
+
+
+def _quiescence(board, alpha, beta, ply, control, remaining=MAX_QUIESCENCE_PLIES):
+    # Check terminal rules before accepting static evaluation. A checked side
+    # must move, so it cannot use its current score as a lower bound.
+    evasions, terminal_score = _moves_or_score(board, 1, ply)
+    if terminal_score is not None:
+        return terminal_score
+    in_check = board.is_check()
+    if remaining == 0:
+        # Avoid treating a missing evasion search as a reliable static score.
+        return 0 if in_check else eval.evaluate(board)
+    if in_check:
+        best_score = -float("inf")
+        moves = evasions
+    else:
+        best_score = eval.evaluate(board)
+        if best_score >= beta:
+            return best_score
+        alpha = max(alpha, best_score)
+        moves = board._legal_moves(tactical_only=True)
+
+    for move in sorted(moves, key=board._tactical_priority, reverse=True):
+        board._push(move)
+        try:
+            if control is not None:
+                control.visit()
+            score = -_quiescence(board, -beta, -alpha, ply + 1, control, remaining - 1)
+        finally:
+            board.undo_move()
+        best_score = max(best_score, score)
+        alpha = max(alpha, score)
+        if alpha >= beta:
+            break
+    return best_score
 
 
 class Node:

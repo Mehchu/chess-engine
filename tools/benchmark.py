@@ -48,7 +48,7 @@ def _rates(nodes, seconds):
     return {"nodes": nodes, "seconds": seconds, "nodes_per_second": nodes / seconds}
 
 
-def _run_case(name, fen, perft_depth, expected_perft, search_depth):
+def _run_case(name, fen, perft_depth, expected_perft, search_depth, *, quiescence=False):
     board = ChessBoard(fen)
     start = perf_counter()
     nodes = board.perft(perft_depth)
@@ -61,7 +61,9 @@ def _run_case(name, fen, perft_depth, expected_perft, search_depth):
         table = TranspositionTable() if mode == "fresh_table" else None
         control = SearchControl()
         start = perf_counter()
-        move, score = negamax_alpha_beta_top(board, search_depth, table=table, control=control)
+        move, score = negamax_alpha_beta_top(
+            board, search_depth, table=table, control=control, quiescence=quiescence
+        )
         search[mode] = {
             **_rates(control.nodes, perf_counter() - start),
             "move": move, "score": float(score),
@@ -100,13 +102,20 @@ def _summarise(runs):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repeat", type=int, default=1)
+    parser.add_argument("--quiescence", action="store_true", help="Use the CLI and UCI leaf search")
     args = parser.parse_args()
     if args.repeat < 1:
         parser.error("--repeat must be positive")
 
     environment = _environment()
-    runs = [[_run_case(*case) for case in CORPUS] for _ in range(args.repeat)]
-    print(json.dumps({"environment": environment, "summary": _summarise(runs), "runs": runs}, indent=2))
+    runs = [
+        [_run_case(*case, quiescence=args.quiescence) for case in CORPUS]
+        for _ in range(args.repeat)
+    ]
+    print(json.dumps({
+        "environment": environment, "quiescence": args.quiescence,
+        "summary": _summarise(runs), "runs": runs,
+    }, indent=2))
 
 
 if __name__ == "__main__":
