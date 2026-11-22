@@ -8,7 +8,7 @@ A Python chess-engine prototype exploring bitboard representations, game-tree se
 - Move generation for all six piece types, including promotion candidates.
 - FEN position parsing and terminal board visualisation.
 - Negamax and alpha–beta search with an optional transposition table.
-- Material and piece-square-table evaluation.
+- Material and piece-square evaluation with phase-dependent king and passed-pawn terms and a bishop-pair bonus.
 - Deterministic Zobrist position hashing and depth-qualified cache bounds.
 - Interactive command-line interface, fixed-depth and clock-managed UCI mode, and reproducible benchmarks.
 
@@ -51,6 +51,11 @@ and hardware details, perft counts, and depth-three search with the table
 disabled and freshly initialised. Perft counts leaf positions. Search
 counts every visited node, including transposition-table hits.
 
+With the development requirements installed, run `python -m tune_evaluation`
+to compare candidate evaluation weights in colour-swapped games. The JSON
+report includes each starting FEN and separates outright results from games
+that reached the ply cap.
+
 The board API detects threefold and 50-move claims, including an intended move.
 Search automatically ends only on the supported automatic rules. Claims are
 available to callers through the board API. To retain repetition history, pass
@@ -70,6 +75,7 @@ and move counters. [FIDE Laws of Chess, Articles 9.2–9.6](https://handbook.fid
 | `main.py` | Interactive entry point |
 | `uci.py` | Fixed-depth and clock-managed UCI entry point |
 | `benchmark.py` | Fixed perft and search corpus with JSON reporting |
+| `tune_evaluation.py` | Paired self-play for evaluation weight experiments |
 
 ## Development roadmap
 

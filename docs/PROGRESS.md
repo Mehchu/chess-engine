@@ -81,3 +81,52 @@
 - All 42 tests passed. Starting-position perft at depth five returned 4,865,609. Legal move sets, check status, and FEN agreed with python-chess across 1,200 additional seeded positions.
 - The fresh table still costs more time than uncached search on both depth-three cases. These measurements cover the fixed corpus on one machine.
 - Suggested commit `perf: speed up king-safety checks and search traversal`.
+
+### Phase-dependent king evaluation
+
+- The previous evaluator scored a sheltered king above a central king in a sparse pawn ending. The new evaluator blends the original king table with a centralisation table as queens, rooks and minor pieces come off the board. It precomputes the 25 blends and preserves the remaining material and piece-square terms.
+- All 44 tests passed. Regressions verify the endgame preference, full-material baseline, and side-to-move symmetry.
+- Three before/after benchmark runs preserved perft and depth-three moves, scores and node counts on the starting position and Kiwipete. Median uncached search rose from 0.0173 to 0.0179 seconds on the starting position and 0.1272 to 0.1314 seconds on Kiwipete. These fixtures measure throughput. Playing strength has yet to be measured with paired self-play.
+- Suggested commit `feat: taper king evaluation by material phase`.
+
+### Passed pawns and bishop pair
+
+- Reviewed the classical Stockfish evaluator for established uses of passed-pawn rank bonuses and the bishop pair. This engine uses its own bitboard spans, phase weights, and square-colour test. [Passed-pawn evaluation](https://github.com/official-stockfish/Stockfish/blob/sf_11/src/evaluate.cpp#L112) · [Pawn spans](https://github.com/official-stockfish/Stockfish/blob/sf_11/src/pawns.cpp#L86) · [Bishop-pair material term](https://github.com/official-stockfish/Stockfish/blob/sf_11/src/material.cpp#L184)
+- Passed-pawn bonuses grow with relative rank and increase as material comes off. Enemy pawns ahead on the same or adjacent files block the bonus. A doubled pawn behind a friendly pawn does not receive it. Owning bishops on both square colours adds 25 centipawns.
+- The passed-pawn score matched a square-by-square reference on 5,000 seeded layouts. Regressions cover phase, both colours, file edges, doubled pawns, and the square-colour requirement.
+- Three benchmark runs preserved both best moves and perft counts. Median uncached search time rose from 0.0177 to 0.0208 seconds on the starting position and from 0.1305 to 0.1475 seconds on Kiwipete. Kiwipete searched 449 fewer nodes and scored 25 centipawns higher.
+- An exploratory fixed-depth self-play run used four endgame positions, swapped evaluators between colours, and capped games at 80 plies. At depth two, one game drew and seven reached the cap. The sample gave no useful playing-strength estimate.
+- Suggested commit `feat: evaluate passed pawns and opposite-colour bishop pairs`.
+
+### Evaluation weight experiments
+
+- Added a repeatable colour-swapped self-play runner using the current evaluator as the control. Each candidate changes one term. Search runs at a fixed depth without a table, and python-chess adjudicates completed games. Games that hit the ply cap are reported separately. The pairing follows the same general test design as Stockfish's Fishtest. [Fishtest worker](https://github.com/official-stockfish/fishtest/blob/master/worker/games.py)
+- The depth-two screen used eight positions, swapped colours for each candidate, and capped games at 120 plies. The material scale changes the nominal non-king values relative to the piece-square terms.
+
+| Candidate change | Wins | Draws | Losses | Unfinished |
+| --- | ---: | ---: | ---: | ---: |
+| Material ×0.85 | 4 | 4 | 4 | 4 |
+| Material ×1.15 | 4 | 3 | 5 | 4 |
+| Endgame king centralisation ×0.5 | 2 | 3 | 2 | 9 |
+| Endgame king centralisation ×1.5 | 4 | 3 | 4 | 5 |
+| Passed pawns ×0.5 | 3 | 3 | 3 | 7 |
+| Passed pawns ×1.5 | 3 | 5 | 4 | 4 |
+| Bishop pair at 12 centipawns | 4 | 4 | 4 | 4 |
+| Bishop pair at 40 centipawns | 4 | 4 | 4 | 4 |
+
+Run the screen with `python -m tune_evaluation`. The validation command is
+`python -m tune_evaluation --suite validation --depth 3 --max-plies 100 --candidate material-low --candidate king-high --candidate passers-low --candidate bishop-pair-high`.
+
+| Depth-three candidate | Wins | Draws | Losses | Unfinished |
+| --- | ---: | ---: | ---: | ---: |
+| Material ×0.85 | 1 | 0 | 1 | 6 |
+| Endgame king centralisation ×1.5 | 1 | 0 | 2 | 5 |
+| Passed pawns ×0.5 | 1 | 0 | 1 | 6 |
+| Bishop pair at 40 centipawns | 1 | 0 | 1 | 6 |
+
+Across both runs, 96 of 160 games finished. None of the candidates recorded
+more wins than losses. The small, hand-picked position sets and unfinished
+games limit the comparison, so the current weights remain the reference.
+All 51 tests passed, including candidate-score and runner checks.
+
+Suggested commit `test: add paired self-play for evaluation weights`.

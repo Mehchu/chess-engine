@@ -96,7 +96,25 @@ class SearchTests(unittest.TestCase):
                     for square, piece in reference.piece_map().items()
                 )
                 expected = white_score if reference.turn else -white_score
-                self.assertEqual(evaluator.evaluate(ChessBoard(fen)), expected)
+                self.assertEqual(evaluator.evaluate_material(ChessBoard(fen)), expected)
+
+    def test_king_centralisation_is_rewarded_in_sparse_endgames(self):
+        from evaluation_functions import EvaluationFunction
+
+        evaluator = EvaluationFunction()
+        sheltered = ChessBoard("4k3/8/8/8/8/8/P7/6K1 w - - 0 1")
+        active = ChessBoard("4k3/8/8/8/3K4/8/P7/8 w - - 0 1")
+        self.assertLess(evaluator.evaluate_material(active), evaluator.evaluate_material(sheltered))
+        self.assertGreater(evaluator.evaluate(active), evaluator.evaluate(sheltered))
+
+    def test_full_material_still_uses_the_original_king_table(self):
+        from evaluation_functions import EvaluationFunction
+        from fen_handling import STARTING_FEN
+
+        evaluator = EvaluationFunction()
+        board = ChessBoard(STARTING_FEN)
+        board.make_move("e2e4")
+        self.assertEqual(evaluator.evaluate(board), evaluator.evaluate_material(board))
 
     def test_narrow_windows_restore_existing_history(self):
         board = ChessBoard("4k3/8/8/8/3Q4/8/8/4K3 w - - 0 1")

@@ -77,6 +77,22 @@ stream generated moves into search. Keep the existing evaluation and move
 ordering as regression baselines. The before/after results are recorded in
 [PROGRESS.md](PROGRESS.md#move-generation-and-search-performance).
 
+## 10. Phase-dependent king evaluation (implemented)
+
+Blend the original king table with an endgame centralisation table as
+non-pawn material disappears. Keep the other piece values and tables as a
+baseline. Targeted tests verify the intended position preferences. Measure
+playing strength in paired self-play before tuning or adding new evaluation
+terms.
+
+## 11. Passed pawns and bishop pair (implemented)
+
+Reward more advanced passed pawns, with a larger bonus in the endgame.
+Award a small material bonus for bishops on both square colours. Use the paired self-play runner to screen weights before adding more terms.
+The first screen and held-out run kept the current defaults. See the
+[progress log](PROGRESS.md#passed-pawns-and-bishop-pair) for research sources
+and measurements.
+
 ## Suggested commit boundaries
 
 - `chore: add runtime and development dependency files`
@@ -91,3 +107,5 @@ ordering as regression baselines. The before/after results are recorded in
 - `fix: adjudicate repetition and move-count draws`
 - `feat: support clock-managed UCI search`
 - `perf: speed up king-safety checks and search traversal`
+- `feat: taper king evaluation by material phase`
+- `feat: evaluate passed pawns and opposite-colour bishop pairs`

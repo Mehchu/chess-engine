@@ -364,6 +364,8 @@ queen_table = (
     + 900
 )
 
+KING_VALUE = 99_999
+
 king_table = (
     np.array(
         [
@@ -433,7 +435,7 @@ king_table = (
             14,
         ][::-1]
     )
-    + 99999
+    + KING_VALUE
 )
 
 table_array = [
@@ -451,6 +453,101 @@ _WHITE_TABLES = tuple(tuple(int(table[square ^ 7]) for square in range(64)) for 
 _BLACK_TABLES = tuple(tuple(int(table[square ^ 63]) for square in range(64)) for table in table_array)
 
 
+# Two queens, four rooks and eight minor pieces contribute 24 at the start.
+_MAX_PHASE = 24
+_ENDGAME_KING = tuple(
+    KING_VALUE + 8 * (min(file, 7 - file) + min(rank, 7 - rank))
+    for rank in range(8)
+    for file in range(8)
+)
+
+
+def _tapered_tables(opening_tables):
+    opening_king = opening_tables[-1]
+    phases = []
+    for phase in range(_MAX_PHASE + 1):
+        king = tuple(
+            round((opening * phase + endgame * (_MAX_PHASE - phase)) / _MAX_PHASE)
+            for opening, endgame in zip(opening_king, _ENDGAME_KING)
+        )
+        phases.append((*opening_tables[:-1], king))
+    return tuple(phases)
+
+
+_WHITE_PHASE_TABLES = _tapered_tables(_WHITE_TABLES)
+_BLACK_PHASE_TABLES = _tapered_tables(_BLACK_TABLES)
+
+
+# a1 is the least-significant bit. Mask the edge files before shifting.
+_A_FILE = 0x0101010101010101
+_H_FILE = 0x8080808080808080
+_BOARD_MASK = (1 << 64) - 1
+_DARK_SQUARES = 0xAA55AA55AA55AA55
+_BISHOP_PAIR_BONUS = 25
+
+_PASSED_MIDDLEGAME = (0, 4, 8, 15, 27, 42, 64, 0)
+_PASSED_ENDGAME = (0, 8, 15, 28, 48, 72, 100, 0)
+_PASSED_BY_PHASE = tuple(
+    tuple(round((opening * phase + ending * (_MAX_PHASE - phase)) / _MAX_PHASE)
+          for opening, ending in zip(_PASSED_MIDDLEGAME, _PASSED_ENDGAME))
+    for phase in range(_MAX_PHASE + 1)
+)
+
+
+def _material_phase(boards):
+    _, knights, bishops, rooks, queens, *_ = boards
+    return min(_MAX_PHASE, knights.bit_count() + bishops.bit_count()
+               + 2 * rooks.bit_count() + 4 * queens.bit_count())
+
+
+def _north_span(pawns):
+    span = pawns << 8
+    span |= span << 8
+    span |= span << 16
+    return (span | (span << 32)) & _BOARD_MASK
+
+
+def _south_span(pawns):
+    span = pawns >> 8
+    span |= span >> 8
+    span |= span >> 16
+    return span | (span >> 32)
+
+
+def _span_with_adjacent_files(span):
+    return span | ((span & ~_A_FILE) >> 1) | ((span & ~_H_FILE) << 1)
+
+
+def _passed_rank_score(pawns, bonuses, rank_flip):
+    score = 0
+    while pawns:
+        bit = pawns & -pawns
+        rank = (bit.bit_length() - 1) // 8
+        score += bonuses[rank ^ rank_flip]
+        pawns ^= bit
+    return score
+
+
+def _passed_pawn_score(white_pawns, black_pawns, phase):
+    # The opposing pawn spans mark squares from which a pawn could still be
+    # stopped by an enemy pawn on its file or an adjacent file.
+    white_passed = white_pawns & ~_span_with_adjacent_files(_south_span(black_pawns))
+    black_passed = black_pawns & ~_span_with_adjacent_files(_north_span(white_pawns))
+    bonuses = _PASSED_BY_PHASE[phase]
+    score = 0
+    if white_passed:
+        score += _passed_rank_score(white_passed & ~_south_span(white_pawns), bonuses, 0)
+    if black_passed:
+        score -= _passed_rank_score(black_passed & ~_north_span(black_pawns), bonuses, 7)
+    return score
+
+
+def _bishop_pair_score(bishops):
+    if bishops & _DARK_SQUARES and bishops & ~_DARK_SQUARES:
+        return _BISHOP_PAIR_BONUS
+    return 0
+
+
 def _colour_score(occupancy, piece_masks, tables):
     score = 0
     for pieces, table in zip(piece_masks, tables):
@@ -462,6 +559,14 @@ def _colour_score(occupancy, piece_masks, tables):
     return score
 
 
+def _position_score(boards, white_to_move, white_tables, black_tables, bonus=0):
+    *pieces, white, black = boards
+    white_score = _colour_score(white, pieces, white_tables)
+    black_score = _colour_score(black, pieces, black_tables)
+    score = white_score - black_score + bonus
+    return float(score if white_to_move else -score)
+
+
 class EvaluationFunction:
     def __init__(self) -> None:
         # Piece values
@@ -471,24 +576,29 @@ class EvaluationFunction:
             "B": 350,
             "R": 550,
             "Q": 900,
-            "K": 99999,
+            "K": KING_VALUE,
         }
 
     def evaluate(self, board) -> float:
-        return self.evaluate_material(board)
+        boards = board.piece_bitboards
+        pawns, _, bishops, _, _, _, white, black = boards
+        phase = _material_phase(boards)
+        bonus = _passed_pawn_score(pawns & white, pawns & black, phase)
+        bonus += _bishop_pair_score(bishops & white) - _bishop_pair_score(bishops & black)
+        return _position_score(
+            boards, board.white_to_move, _WHITE_PHASE_TABLES[phase], _BLACK_PHASE_TABLES[phase], bonus
+        )
 
     def evaluate_material(self, board) -> float:
-        *pieces, white, black = board.piece_bitboards
-        white_score = _colour_score(white, pieces, _WHITE_TABLES)
-        black_score = _colour_score(black, pieces, _BLACK_TABLES)
-        score = white_score - black_score
-        return float(score if board.white_to_move else -score)
+        """Return the original material and piece-square baseline."""
+        return _position_score(board.piece_bitboards, board.white_to_move, _WHITE_TABLES, _BLACK_TABLES)
 
     def evaluate_pawn_structure(self, board) -> float:
-        # Evaluate pawn structure (e.g., isolated pawns, doubled pawns, passed pawns)
-        eval = 0
-
-        return eval
+        """Return the passed-pawn term from the side to move's perspective."""
+        boards = board.piece_bitboards
+        pawns, *_, white, black = boards
+        score = _passed_pawn_score(pawns & white, pawns & black, _material_phase(boards))
+        return float(score if board.white_to_move else -score)
 
     def evaluate_piece_development(self, board) -> float:
         # Evaluate piece development (e.g., pieces developed vs. undeveloped)
