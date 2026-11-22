@@ -1,5 +1,4 @@
 import numpy as np
-from enum import Enum
 
 piece_to_index = {"P": 0, "N": 1, "B": 2, "R": 3, "Q": 4, "K": 5}
 
@@ -465,97 +464,27 @@ class EvaluationFunction:
         # Material evaluation
         eval += 1.0 * self.evaluate_material(board)
 
-        '''# Pawn structure evaluation
-        eval += 0.3 * self.evaluate_pawn_structure(board)
-
-        # King safety evaluation
-        eval += 10 * self.evaluate_king_safety(board)
-
-        # Piece development evaluation
-        eval += 0.3 * self.evaluate_piece_development(board)
-        
-        # Mobility evaluation
-        eval += 10 * self.evaluate_mobility(board)'''
-
         return eval
 
-    def evaluate_material(
-        self, board
-    ) -> float:  # Evaluate how much material each side has
-        eval = 0.0
-
-        for square in range(64):  # Loop through each square on the chess board
+    def evaluate_material(self, board) -> float:
+        white_score = 0.0
+        for square in range(64):
             piece = board.determine_piece_on_square(square)
-
-            if piece == None:  # Skip the square if there is no piece on it
+            if piece is None:
                 continue
-
-            piece = piece.upper()
-
-            if np.uint64(1 << square) & board.all_bitboards[6]:
-                eval += table_array[piece_to_index[piece]][
-                    square
-                ]  # If the piece is the current player's, add the material
-
+            table = table_array[piece_to_index[piece.upper()]]
+            # The stored arrays were reversed from a8-first, h1-last layout.
+            if piece.isupper():
+                white_score += table[square ^ 7]
             else:
-                eval -= table_array[piece_to_index[piece]][
-                    63 - square
-                ]  # Otherwise subtract the value
-
-        return eval
-
-    def evaluate_mobility(self, board) -> float:  # Evaluate how mobile each side is
-        white_mobility = len(
-            board.legal_moves
-        )  # Determines how many legal moves white has
-
-        board.flip_board()  # Makes it blacks turn so that black's moves can be generated
-        black_mobility = len(
-            board.legal_moves
-        )  # Determines how many legal moves black has
-        
-
-        return white_mobility - black_mobility  # Returns the difference between them
+                white_score -= table[square ^ 63]
+        return white_score if board.white_to_move else -white_score
 
     def evaluate_pawn_structure(self, board) -> float:
         # Evaluate pawn structure (e.g., isolated pawns, doubled pawns, passed pawns)
         eval = 0
 
         return eval
-
-    def evaluate_king_safety(
-        self, board
-    ) -> float:  # Evaluate king safety (e.g., pawn shelter, open lines near the king)
-        white_open_lines = []
-        black_open_lines = []
-
-        white_king_square = (
-            board.all_bitboards[5] & board.all_bitboards[6]
-        ).item().bit_length() - 1  # Finds the square that the white king is on
-
-        white_open_lines.extend(
-            board.generate_orthogonal_moves(white_king_square)
-        )  # Add the horizontal and vertical lines open near the king
-        white_open_lines.extend(
-            board.generate_diagonal_moves(white_king_square)
-        )  # Add the diagonal lines near the king
-
-        board.flip_board()  # Flip the board to the other colour
-
-        black_king_square = (
-            board.all_bitboards[5] & board.all_bitboards[6]
-        ).item().bit_length() - 1  # Find the black king
-
-        black_open_lines.extend(
-            board.generate_orthogonal_moves(black_king_square)
-        )  # Add the horizontal and vertical lines open near the king
-        black_open_lines.extend(
-            board.generate_diagonal_moves(black_king_square)
-        )  # Add the diagonal lines near the king
-
-        return len(white_open_lines) - len(
-            black_open_lines
-        )  # Return the difference in king safety, not negated due to earlier board flips
 
     def evaluate_piece_development(self, board) -> float:
         # Evaluate piece development (e.g., pieces developed vs. undeveloped)

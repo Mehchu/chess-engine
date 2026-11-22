@@ -1,8 +1,5 @@
-import numpy as np
-
-
 # Creates an exception via inheritance which can be raised when invalid notation is attempted to be parsed
-class InvalidNotation(Exception):
+class InvalidNotation(ValueError):
     def __init__(self, notation: str):
         self.message = f'"{notation}" is invalid move notation'
         super().__init__(self.message)
@@ -11,47 +8,26 @@ class InvalidNotation(Exception):
 # Creates an exception via inheritance which can be raised when an invalid square is attempted to be parsed
 class InvalidSquare(Exception):
     def __init__(self, square: str):
-        self.message = f'"{square}" is ian invalid square'
+        self.message = f'"{square}" is an invalid square'
         super().__init__(self.message)
 
 
-def decompose_notation(notation: str) -> str:
-    try:
-        # Tries to split the notation into a start square and an end square
-        start_square = decode_square(notation[:2])
-        end_square = decode_square(notation[2:4])
-
-    except (
-        ValueError
-    ):  # Raised if the sub strings passed to decode_decode square are invalid
+def decompose_notation(notation: str) -> tuple[int, int, str | None]:
+    if len(notation) not in (4, 5):
         raise InvalidNotation(notation)
-
-    except (
-        IndexError
-    ):  # Raised if the notation is too short so cannot be sliced properly
+    promotion = notation[4:].lower() or None
+    if promotion is not None and promotion not in "qrbn":
         raise InvalidNotation(notation)
-
     try:
-        promotion_piece = notation[
-            4
-        ]  # IF there is a 5th character in the string, it will be the promotion piece
-        if (
-            promotion_piece.upper() not in "PNBRQK"
-        ):  # Don't allow promotion to pieces that don't exist
-            raise InvalidNotation(notation)
-
-    except (
-        IndexError
-    ):  # If the 5th character does not exist, then it is not promotion so no promotion piece is necessary
-        promotion_piece = None
-
-    return (start_square, end_square, promotion_piece)
+        return decode_square(notation[:2]), decode_square(notation[2:4]), promotion
+    except (InvalidSquare, ValueError) as exc:
+        raise InvalidNotation(notation) from exc
 
 
 # Function to convert a numerical square into an algebraic square
 def encode_square(numerical_square: int) -> str:
     if isOnBoard(numerical_square):  # First checks if the square is on the board
-        return chr(np.uint64(numerical_square % 8 + 97)) + str(
+        return chr(numerical_square % 8 + 97) + str(
             numerical_square // 8 + 1
         )  # Converts the number to algebra e.g. 0 becomes a1, through mod and div and relevant ASCII conversions
     else:  # Raises an exception if the square is not on the board

@@ -4,7 +4,7 @@ A Python chess-engine prototype exploring bitboard representations, game-tree se
 
 ## Features
 
-- NumPy-based 64-bit bitboards for piece placement and occupancy.
+- 64-square integer bitboards for piece placement and occupancy.
 - Move generation for all six piece types, including promotion candidates.
 - FEN position parsing and terminal board visualisation.
 - Experimental minimax and negamax search, including alpha–beta pruning.
@@ -12,7 +12,7 @@ A Python chess-engine prototype exploring bitboard representations, game-tree se
 - Prototype position hashing and transposition-table caching.
 - Interactive command-line interface with search timing.
 
-**Status:** early-stage experimental engine. Move generation is currently pseudo-legal and full chess-rule compliance, position restoration, search correctness and automated validation are active development goals. This is not yet a competition-ready or UCI-compatible engine.
+**Status:** early-stage experimental engine. Legal moves and position restoration are covered by perft and python-chess comparisons. Draw adjudication beyond stalemate, search correctness, and UCI support remain in development.
 
 ## Getting started
 
@@ -31,7 +31,7 @@ For development, run `python -m pip install -r requirements-dev.txt` inside
 the same virtual environment. This also installs python-chess as a reference
 for tests.
 
-Press Enter to load the standard starting position, or enter a FEN string to experiment with piece placement. Enter moves in coordinate notation, such as `e2e4`, or `exit` to quit. The current prototype searches at a fixed depth of four plies and prints an evaluation and elapsed search time. Search can be slow, and experimental board-perspective handling means subsequent moves may not follow standard board coordinates reliably.
+Press Enter to load the standard starting position, or enter a FEN string to experiment with piece placement. Enter moves in coordinate notation, such as `e2e4`, or `exit` to quit. The current prototype searches at a fixed depth of four plies and prints an evaluation and elapsed search time. Both sides use standard board coordinates. For a promotion, append the piece letter, as in `e7e8q`.
 
 ## Implementation
 
@@ -47,9 +47,10 @@ Press Enter to load the standard starting position, or enter a FEN string to exp
 
 ## Development roadmap
 
-- [ ] Correct position state, make/undo and FEN round trips.
-- [ ] Complete legal move generation, including checks, castling and en passant.
-- [ ] Add automated tests and standard perft validation.
+See [the detailed roadmap](docs/ROADMAP.md) and [development progress](docs/PROGRESS.md). Run the regression suite with `python -m unittest discover -v`.
+
+- [x] Correct position state, make/undo and FEN round trips.
+- [x] Verify legal move generation, including checks, castling and en passant, with perft and python-chess.
 - [ ] Verify negamax and alpha–beta against an independent reference search.
 - [ ] Correct transposition table keys and bound handling.
 - [ ] Introduce iterative deepening, move ordering and quiescence search.

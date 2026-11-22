@@ -147,15 +147,10 @@ def negamax(board, depth, color):
 def negamax_alpha_beta_top(
     board, depth, alpha, beta, color
 ):  # Negamax split into two functions to save memory by not storing the best move at every recursion call, but only at the top level
-    key = hash.generate_key(
-        board.all_bitboards
-    )  # Generate a unique key for the current position
-
-    if board.is_game_over()[0]:  # If the game is over before the final depth is reached
-        print(
-            "White won" if board.is_game_over()[1] > 0 else "Black won"
-        )  # Check the second argument which indicates who won
-        depth = 0  # Resets the depth to trigger the next selection statement
+    key = (hash.generate_key(board.all_bitboards), board.white_to_move)
+    ended, score = board.is_game_over()
+    if ended:
+        return None, score
 
     if depth == 0:  # If the final depth has been reached
         return None, color * eval.evaluate(
@@ -200,9 +195,7 @@ def negamax_alpha_beta_top(
 def negamax_alpha_beta(
     board, depth, alpha, beta, color
 ):  # For recursion calls of negamax
-    key = hash.generate_key(
-        board.all_bitboards
-    )  # Generate a unique key for the current position
+    key = (hash.generate_key(board.all_bitboards), board.white_to_move)
     if (
         key in transposition_table.table
         and transposition_table.table[key]["depth"]
@@ -212,8 +205,9 @@ def negamax_alpha_beta(
             "score"
         ]  # Return the previously computed evaluation for the position
         
-    if board.is_game_over()[0]:
-        return board.is_game_over()[1]
+    ended, score = board.is_game_over()
+    if ended:
+        return score
 
     if depth == 0:  # If no more searching for this branch is needed
         return color * eval.evaluate(board)
@@ -223,7 +217,6 @@ def negamax_alpha_beta(
     best_score = -float("inf")  # Initialise the starting score for this search branch
 
     # Search through each legal move in the position
-    board.generate_legal_moves()
     for move in board.legal_moves:
         board.make_move(move)  # Make the move to be searched through
         score = -negamax_alpha_beta(

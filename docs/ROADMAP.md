@@ -2,7 +2,7 @@
 
 The engine will own its position state, move rules, evaluation, and search. Keep python-chess in the development requirements as a test oracle. Each stage should pass before work begins on optimisations that depend on it.
 
-## 1. Position state and coordinates
+## 1. Position state and coordinates (implemented)
 
 **Findings.** `ChessBoard` rotates piece bitboards and swaps colour masks after every move. Rotation also treats castling flags and the en passant square index as spatial masks. The old FEN parser loses the active colour and clocks, and reverses en passant ranks. `notation_handling.py` and `referenceBoard.txt` already supply the fixed a1 = 0 coordinate convention.
 
@@ -10,7 +10,7 @@ Keep that convention throughout the engine and preserve the piece and colour mas
 
 **Acceptance.** Both colours and all six FEN fields survive round trips. Colour masks are disjoint, type masks are disjoint, and both unions give the same occupancy. A black-to-move position uses ordinary coordinates through the CLI.
 
-## 2. Make and undo
+## 2. Make and undo (implemented)
 
 **Findings.** The move routine records history before validating the move. Undo restores only the array and permits consuming the initial snapshot. Promotion derives colour from the promotion character, and castling and en passant lack complete state transitions.
 
@@ -18,7 +18,7 @@ Use snapshots of board masks and rule state as the first undo implementation. Th
 
 **Acceptance.** Every move class has a make/undo regression, including black promotions and rook captures on original squares. Failed moves leave position and history intact. Undo restores the complete position, including after nested moves.
 
-## 3. Legal move generation
+## 3. Legal move generation (verified)
 
 **Findings.** The current generator produces pseudo-legal moves, permits king captures, can wrap king moves across files, and does not enforce castling or king safety. Game-over detection relies on cached moves and missing kings.
 
@@ -26,9 +26,9 @@ Reuse piece dispatch and sliding-ray traversal where appropriate. Add colour-awa
 
 **Acceptance.** Compare full UCI move sets and resulting positions with python-chess using curated fixtures and fixed-seed legal playouts. Cover pins, double check, castling through check, en passant exposing the king, and all promotions. Add perft and root divide with canonical counts, including the starting position at depths 1–4 (20, 400, 8,902, 197,281) and Kiwipete at depths 1–3 (48, 2,039, 97,862). Keep fast cases in the default suite and run deeper cases separately.
 
-## 4. Negamax and alpha–beta
+## 4. Negamax and alpha–beta (next)
 
-**Findings.** A terminal-state tuple is used as a Boolean in plain negamax. Minimax shadows the evaluator name. The active alpha–beta path consumes stale root moves and mixes score conventions at internal nodes. Dormant evaluation helpers mutate the board. The active evaluator uses a square transform coupled to board rotation.
+**Findings.** A terminal-state tuple is used as a Boolean in plain negamax. Minimax shadows the evaluator name. The prototype search entry points mix score conventions. The active path still uses the experimental cache, so it needs an uncached correctness baseline.
 
 Keep the existing material and piece-square baseline, verify table orientation, and define a single score convention at the search boundary. Implement plain negamax as a correctness reference. Test alpha–beta with caching disabled. Evaluate checkmate and stalemate at the horizon, score mate with ply distance, and restore the board in a finally block after every recursive move. Route CLI play through the verified entry point. Leave the unfinished Monte Carlo prototype outside the active path.
 

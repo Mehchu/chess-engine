@@ -1,16 +1,18 @@
-import numpy as np
 from enum import Enum
 
-from fen_handling import (
-    fen_to_bitboards,
-    bitboards_to_fen,
-    display_chess_position,
-)
-from notation_handling import (
-    decompose_notation,
-    encode_square,
-    isOnBoard,
-)
+from fen_handling import CASTLING, FenPosition, display_chess_position, parse_fen
+from notation_handling import decompose_notation, encode_square
+
+WHITE, BLACK = 6, 7
+ORTHOGONAL = ((-1, 0), (1, 0), (0, -1), (0, 1))
+DIAGONAL = ((-1, -1), (-1, 1), (1, -1), (1, 1))
+KING_STEPS = ORTHOGONAL + DIAGONAL
+KNIGHT_STEPS = ((-2, -1), (-2, 1), (2, -1), (2, 1),
+                (-1, -2), (-1, 2), (1, -2), (1, 2))
+ROOK_RIGHTS = {0: CASTLING["Q"], 7: CASTLING["K"],
+               56: CASTLING["q"], 63: CASTLING["k"]}
+KING_RIGHTS = {WHITE: CASTLING["K"] | CASTLING["Q"],
+               BLACK: CASTLING["k"] | CASTLING["q"]}
 
 
 class PieceType(Enum):
@@ -22,410 +24,289 @@ class PieceType(Enum):
     K = 5
 
 
+PAWN, KNIGHT, BISHOP, ROOK, QUEEN, KING = (piece.value for piece in PieceType)
+PROMOTIONS = "qrbn"
+
+
 class GameOver(Exception):
-    def __init__(self, player):
-        print("Engine won" if player else "Player won")
+    pass
+
+
+def _offset(square, dx, dy):
+    file, rank = square % 8 + dx, square // 8 + dy
+    if 0 <= file < 8 and 0 <= rank < 8:
+        return rank * 8 + file
+    return None
+
+
+def _steps(square, directions):
+    for dx, dy in directions:
+        target = _offset(square, dx, dy)
+        if target is not None:
+            yield target
+
+
+def _squares(mask):
+    while mask:
+        bit = mask & -mask
+        yield bit.bit_length() - 1
+        mask ^= bit
+
+
+def _move_text(move):
+    start, end, promotion = move
+    return encode_square(start) + encode_square(end) + (promotion or "")
 
 
 class ChessBoard:
-    def __init__(self, fen) -> None:
-        self.white_to_move = True
-        self.legal_moves = None
-        # Convert the inputted fen to an array of binary integers
-        temporary_bitboards = fen_to_bitboards(fen)
+    def __init__(self, fen):
+        self._restore(parse_fen(fen))
+        self.previous_positions = []
 
-        # Collect all bitboards into a NumPy array
-        self.all_bitboards = np.array(
-            [
-                # Initialise bitboards for each piece type using NumPy's unsigned integers for better performance
-                temporary_bitboards[0],  # Pawns, 0
-                temporary_bitboards[1],  # Knights, 1
-                temporary_bitboards[2],  # Bishops, 2
-                temporary_bitboards[3],  # Rooks, 3
-                temporary_bitboards[4],  # Queens, 4
-                temporary_bitboards[5],  # Kings, 5
-                # Initialise general bitboards for each side and the board overall
-                temporary_bitboards[6],  # White, 6
-                temporary_bitboards[7],  # Black, 7
-                # Initialise miscellaneous bitboards for special moves and nuanced evaluation
-                temporary_bitboards[8],  # Castling, 8
-                temporary_bitboards[9],  # En passant, 9
-                temporary_bitboards[6] | temporary_bitboards[7],  # Occupancy mask, 10
-                0,  # Attacked squares, 11 # TODO
-                0,  # Pawn structure, 12 # TODO
-            ],
+    def _restore(self, position):
+        self._boards = list(position.piece_boards)
+        self.white_to_move = position.white_to_move
+        self.castling_rights = position.castling_rights
+        self.en_passant = position.en_passant
+        self.halfmove_clock = position.halfmove_clock
+        self.fullmove_number = position.fullmove_number
+
+    def _snapshot(self):
+        return FenPosition(
+            tuple(self._boards), self.white_to_move, self.castling_rights,
+            self.en_passant, self.halfmove_clock, self.fullmove_number,
+        )
+
+    @property
+    def occupancy(self):
+        return self._boards[WHITE] | self._boards[BLACK]
+
+    @property
+    def all_bitboards(self):
+        """Provide the prototype search with its legacy array layout."""
+        import numpy as np
+
+        return np.array(
+            [*self._boards, self.castling_rights, self.en_passant or 0,
+             self.occupancy, 0, 0],
             dtype=np.uint64,
         )
 
-        self.previous_positions = [self.all_bitboards.copy()]  # TODO: make better
+    @property
+    def legal_moves(self):
+        return self.generate_legal_moves()
 
-        self.legal_moves = self.generate_legal_moves()
+    def to_fen(self):
+        return self._snapshot().to_fen()
 
-    def is_game_over(self):
-        if len(self.legal_moves) == 0:  # Stalemate
-            return True, 0
-
-        if (
-            not self.all_bitboards[5] & self.all_bitboards[6]
-        ):  # White king has been captured
-            return True, 99999
-
-        if (
-            not self.all_bitboards[5] & self.all_bitboards[7]
-        ):  # Black king has been captured
-            return True, -99999
-        return False, 0
-
-    def knight_moved_over_edge(self, start_square, dest_square):
-
-        # Get file and rank indices of start and dest squares
-        start_file = start_square % 8
-        start_rank = start_square // 8
-        dest_file = dest_square % 8
-        dest_rank = dest_square // 8
-
-        # Check if the move crosses an edge in any direction
-        return (
-            abs(dest_file - start_file) > 2  # Check file difference
-            or abs(dest_rank - start_rank) > 2  # Check rank difference
-        )
-
-    def make_move(self, long_algebraic_notation):  # TODO: Update misc bitboards
-        if (
-            long_algebraic_notation == None
-        ):  # Engine can only make a None type move if it has lost the game
-            raise GameOver(False)  # Flag that the game is over, and the player has won
-
-        self.previous_positions.append(
-            self.all_bitboards.copy()
-        )  # Store the current position so that the move can later be undone TODO: only store the bitboards which have actually changed to save memory
-
-        start_square, end_square, promotion_piece = decompose_notation(
-            long_algebraic_notation
-        )  # Breaks down the notation into usable chunks
-
-        piece = self.determine_piece_on_square(
-            start_square
-        )  # Determine the piece which is being moved
-
-        if (
-            piece is None
-        ):  # Should never be triggered, given only legal moves are being made
-            return
-
-        # Creates masks to turn off a specified bit
-        try:
-            start_mask = np.uint64(
-                ~(1 << start_square) % (1 << 64)
-            )  # Creates a mask to quickly wipe a square from every bitboard
-        except OverflowError:  # Catches out of bounds problem for moving to h8
-            if start_square == 63:
-                start_mask = np.uint64(0xFFFFFFFFFFFFFFFE)
-            if start_square == 0:
-                start_mask = np.uint64(0xEFFFFFFFFFFFFFFF)
-        try:
-            end_mask = np.uint64(
-                ~(1 << end_square) % (1 << 64)
-            )  # Creates a mask to quickly wipe a square from every bitboard
-        except OverflowError:
-            if end_square == 63:
-                end_mask = np.uint64(0xFFFFFFFFFFFFFFFE)
-            if end_square == 0:
-                end_mask = np.uint64(0xEFFFFFFFFFFFFFFF)
-
-        # Delete the piece, if any, on the end square
-        for index in range(8):
-            self.all_bitboards[index] &= end_mask
-
-        # Identify the correct bitboard to update
-        bitboard_index = PieceType[piece.upper()].value
-
-        # Delete the moving piece
-        self.all_bitboards[bitboard_index] &= start_mask
-
-        # Update the targeted bitboard for the new piece if applicable
-        if promotion_piece != None:
-            piece = promotion_piece
-            bitboard_index = PieceType[piece.upper()].value
-
-        # Updates the target bitboard with the new piece on the end square
-        self.all_bitboards[bitboard_index] |= np.uint64(1 << end_square)
-
-        # Update coloured bitboards
-        if piece.isupper():
-            self.all_bitboards[6] &= start_mask
-            self.all_bitboards[6] |= np.uint64(1 << end_square)
-        else:
-            self.all_bitboards[7] &= start_mask
-            self.all_bitboards[7] |= np.uint64(1 << end_square)
-
-        # Update misc bitboards
-        self.all_bitboards[9] = 0
-        self.update_occupancy_mask()
-
-        if piece.upper() == "P" and abs(end_square // 8 - start_square // 8) == 2:
-            self.all_bitboards[9] = end_square
-
-        # Make it the other colour's move to make
-        self.flip_board()
-        self.white_to_move = not self.white_to_move
-
-    def undo_move(self):  # Returns the board to its previous position TODO: Make better
-        self.all_bitboards = self.previous_positions[-1]
-        self.previous_positions.pop()
+    def _piece_type(self, mask):
+        return next((index for index in range(6) if self._boards[index] & mask), None)
 
     def determine_piece_on_square(self, square):
-        if self.all_bitboards[10] & np.uint64(1 << square):
-            for index in range(6):
-                if self.all_bitboards[index] & np.uint64(1 << square):
-                    piece = PieceType(index).name
-                    return (
-                        piece.lower()
-                        if self.all_bitboards[7] & np.uint64(1 << square)
-                        else piece
-                    )
-        return None
+        mask = 1 << square
+        piece = self._piece_type(mask)
+        if piece is None:
+            return None
+        name = PieceType(piece).name
+        return name if self._boards[WHITE] & mask else name.lower()
 
-    def update_occupancy_mask(self):
-        self.all_bitboards[10] = self.all_bitboards[6] | self.all_bitboards[7]
+    def make_move(self, notation):
+        if notation is None:
+            raise GameOver()
+        move = decompose_notation(notation)
+        side, enemy = (WHITE, BLACK) if self.white_to_move else (BLACK, WHITE)
+        if move not in self._candidates(side, enemy) or not self._keeps_king_safe(move, side, enemy):
+            raise ValueError(f"Illegal move: {notation}")
+        self._push(move)
 
-    def generate_orthogonal_moves(self, square):
-        move_list = []
+    def _push(self, move):
+        start, end, promotion = move
+        start_mask, end_mask = 1 << start, 1 << end
+        side, enemy = (WHITE, BLACK) if self.white_to_move else (BLACK, WHITE)
+        piece = self._piece_type(start_mask)
+        capture_mask = end_mask
+        if piece == PAWN and end == self.en_passant and not self.occupancy & end_mask:
+            capture_mask = 1 << (end - 8 if side == WHITE else end + 8)
+        captured = self._piece_type(capture_mask)
+        self.previous_positions.append(self._snapshot())
 
-        directions = [(-1, 0), (1, 0), (0, -1), (0, 1)]  # left, right, up, down
+        if captured is not None:
+            self._boards[captured] &= ~capture_mask
+            self._boards[enemy] &= ~capture_mask
+            if captured == ROOK:
+                self.castling_rights &= ~ROOK_RIGHTS.get(end, 0)
 
+        self._boards[piece] &= ~start_mask
+        placed = PieceType[promotion.upper()].value if promotion else piece
+        self._boards[placed] |= end_mask
+        self._boards[side] = (self._boards[side] & ~start_mask) | end_mask
+
+        if piece == KING:
+            self.castling_rights &= ~KING_RIGHTS[side]
+            if abs(end - start) == 2:
+                rook_start, rook_end = (start + 3, start + 1) if end > start else (
+                    start - 4, start - 1
+                )
+                rook_move = (1 << rook_start) | (1 << rook_end)
+                self._boards[ROOK] ^= rook_move
+                self._boards[side] ^= rook_move
+        elif piece == ROOK:
+            self.castling_rights &= ~ROOK_RIGHTS.get(start, 0)
+
+        self.en_passant = (start + end) // 2 if piece == PAWN and abs(end - start) == 16 else None
+        self.halfmove_clock = 0 if piece == PAWN or captured is not None else self.halfmove_clock + 1
+        self.fullmove_number += side == BLACK
+        self.white_to_move = not self.white_to_move
+
+    def undo_move(self):
+        self._restore(self.previous_positions.pop())
+
+    def _rays(self, square, directions):
+        occupied = self.occupancy
         for dx, dy in directions:
-            new_square = square + dx + 8 * dy
-
-            while isOnBoard(new_square):
-                if (
-                    abs(new_square % 8 - square % 8) > 0
-                    and abs(new_square // 8 - square // 8) > 0
-                ):
-                    break  # Move crosses board edge
-
-                if np.uint64(1 << new_square) & self.all_bitboards[10]:
-                    if np.uint64(1 << new_square) & self.all_bitboards[7]:
-                        move_list.insert(
-                            0, f"{encode_square(square)}{encode_square(new_square)}"
-                        )
+            target = _offset(square, dx, dy)
+            while target is not None:
+                yield target
+                if occupied & (1 << target):
                     break
+                target = _offset(target, dx, dy)
 
-                move_list.append(f"{encode_square(square)}{encode_square(new_square)}")
+    def _attacked(self, square, attacker):
+        attackers = self._boards[attacker]
+        pawn_sources = ((-1, -1), (1, -1)) if attacker == WHITE else ((-1, 1), (1, 1))
+        for piece, directions in ((PAWN, pawn_sources), (KNIGHT, KNIGHT_STEPS), (KING, KING_STEPS)):
+            mask = attackers & self._boards[piece]
+            if any(mask & (1 << target) for target in _steps(square, directions)):
+                return True
+        for piece, directions in ((ROOK, ORTHOGONAL), (BISHOP, DIAGONAL)):
+            mask = attackers & (self._boards[piece] | self._boards[QUEEN])
+            if mask and any(mask & (1 << target) for target in self._rays(square, directions)):
+                return True
+        return False
 
-                new_square += dx + 8 * dy
+    def _in_check(self, side, enemy):
+        king = self._boards[KING] & self._boards[side]
+        return bool(king and self._attacked(king.bit_length() - 1, enemy))
 
-        return move_list
+    def is_check(self):
+        return self._in_check(WHITE, BLACK) if self.white_to_move else self._in_check(BLACK, WHITE)
 
-    def generate_diagonal_moves(self, square):
-        move_list = []
+    def _pawn_targets(self, square, side, enemy):
+        direction = 1 if side == WHITE else -1
+        first_rank = 1 if side == WHITE else 6
+        last_rank = 7 if side == WHITE else 0
+        targets = []
+        advance = _offset(square, 0, direction)
+        if advance is not None and not self.occupancy & (1 << advance):
+            targets.append(advance)
+            double = advance + 8 * direction
+            if square // 8 == first_rank and not self.occupancy & (1 << double):
+                targets.append(double)
+        enemy_pieces = self._boards[enemy] & ~self._boards[KING]
+        for target in _steps(square, ((-1, direction), (1, direction))):
+            if enemy_pieces & (1 << target):
+                targets.append(target)
+            elif target == self.en_passant and not self.occupancy & (1 << target):
+                captured = 1 << (target - 8 * direction)
+                if captured & self._boards[PAWN] & self._boards[enemy]:
+                    targets.append(target)
+        for target in targets:
+            for promotion in PROMOTIONS if target // 8 == last_rank else (None,):
+                yield square, target, promotion
 
-        directions = [(-1, -1), (-1, 1), (1, -1), (1, 1)]  # NW, NE, SW, SE
+    def _castle_moves(self, square, side, enemy):
+        home = 4 if side == WHITE else 60
+        if square != home or not self.castling_rights & KING_RIGHTS[side]:
+            return
+        if self._attacked(square, enemy):
+            return
+        for step, rook, empty in ((1, home + 3, (home + 1, home + 2)),
+                                  (-1, home - 4, (home - 1, home - 2, home - 3))):
+            if not self.castling_rights & ROOK_RIGHTS[rook]:
+                continue
+            if not self._boards[ROOK] & self._boards[side] & (1 << rook):
+                continue
+            if any(self.occupancy & (1 << target) for target in empty):
+                continue
+            if not self._attacked(home + step, enemy):
+                yield home, home + 2 * step, None
 
-        for dx, dy in directions:
-            new_square = square + dx + 8 * dy
+    def _candidates(self, side, enemy):
+        excluded = self._boards[side] | (self._boards[enemy] & self._boards[KING])
+        for square in _squares(self._boards[side]):
+            piece = self._piece_type(1 << square)
+            if piece == PAWN:
+                yield from self._pawn_targets(square, side, enemy)
+                continue
+            if piece == KNIGHT:
+                targets = _steps(square, KNIGHT_STEPS)
+            elif piece == KING:
+                targets = _steps(square, KING_STEPS)
+                yield from self._castle_moves(square, side, enemy)
+            elif piece == BISHOP:
+                targets = self._rays(square, DIAGONAL)
+            elif piece == ROOK:
+                targets = self._rays(square, ORTHOGONAL)
+            else:
+                targets = self._rays(square, KING_STEPS)
+            for target in targets:
+                if not excluded & (1 << target):
+                    yield square, target, None
 
-            while isOnBoard(new_square):
-                if abs(new_square % 8 - square % 8) != abs(
-                    new_square // 8 - square // 8
-                ):
-                    break  # Move is not diagonal
-
-                if np.uint64(1 << new_square) & self.all_bitboards[10]:
-                    if np.uint64(1 << new_square) & self.all_bitboards[7]:
-                        move_list.insert(
-                            0, f"{encode_square(square)}{encode_square(new_square)}"
-                        )
-                    break
-
-                move_list.append(f"{encode_square(square)}{encode_square(new_square)}")
-
-                new_square += dx + 8 * dy
-
-        return move_list
-
-    def generate_knight_moves(self, square):
-        move_list = []
-
-        # Unroll the a for loop for all possible knight moves for no loop overhead
-        new_squares = [
-            square - 17,
-            square - 15,
-            square - 10,
-            square - 6,
-            square + 6,
-            square + 10,
-            square + 15,
-            square + 17,
-        ]
-
-        for new_square in new_squares:
-            if (
-                isOnBoard(new_square)
-                and not np.uint64(1 << new_square) & self.all_bitboards[6]
-            ):
-                if not self.knight_moved_over_edge(square, new_square):
-                    move_list.append(
-                        f"{encode_square(square)}{encode_square(new_square)}"
-                    )
-
-        return move_list
-
-    def generate_king_moves(self, square):
-        offsets = [1, -1, -8, 8, 9, -9, 7, -7]
-
-        return [
-            f"{encode_square(square)}{encode_square(square + offset)}"
-            for offset in offsets
-            if (
-                isOnBoard(square + offset)
-                and not np.uint64(1 << (square + offset)) & self.all_bitboards[6]
-            )
-        ]
-
-    def generate_pawn_moves(self, square):
-        move_list = []
-        # Find forward pawn moves
-        if (
-            isOnBoard(square + 8)
-            and not np.uint64(1 << (square + 8)) & self.all_bitboards[10]
-        ):
-            if (
-                square // 8 == 1
-                and not np.uint64(1 << (square + 16)) & self.all_bitboards[10]
-            ):  # If the pawn is still on starting rank
-                move_list.append(f"{encode_square(square)}{encode_square(square + 16)}")
-
-            # Handle promotion
-            if (square + 8) // 8 == 7:
-                for piece in PieceType:
-                    if piece.name != "P" and piece.name != "K":
-                        move_list.insert(
-                            0,
-                            (
-                                f"{encode_square(square)}{encode_square(square + 8)}{piece.name}"
-                            ),
-                        )
-            else:  # Move forward normally
-                move_list.append(f"{encode_square(square)}{encode_square(square + 8)}")
-
-        # Find captures
+    def _keeps_king_safe(self, move, side, enemy):
+        self._push(move)
         try:
-            if np.uint64(1 << (square + 7)) & self.all_bitboards[
-                7
-            ] and not self.knight_moved_over_edge(square, square + 7):
-                # Handle promotion
-                if (square + 7) // 8 == 7:
-                    for piece in PieceType:
-                        if piece.name != "P" and piece.name != "K":
-                            move_list.insert(
-                                0,
-                                (
-                                    f"{encode_square(square)}{encode_square(square + 7)}{piece.name}"
-                                ),
-                            )
-                else:
-                    move_list.insert(
-                        0, f"{encode_square(square)}{encode_square(square + 7)}"
-                    )
-        except:
-            print("Probably fix this")
-        try:
-            if np.uint64(1 << (square + 9)) & self.all_bitboards[
-                7
-            ] and not self.knight_moved_over_edge(square, square + 9):
-                # Handle promotion
-                if (square + 9) // 8 == 7:
-                    for piece in PieceType:
-                        if piece.name != "P" and piece.name != "K":
-                            move_list.insert(
-                                0,
-                                (
-                                    f"{encode_square(square)}{encode_square(square + 9)}{piece.name}"
-                                ),
-                            )
-                else:
-                    move_list.insert(
-                        0, f"{encode_square(square)}{encode_square(square + 9)}"
-                    )
-        except OverflowError:
-            print("Probably fix this")
+            return not self._in_check(side, enemy)
+        finally:
+            self.undo_move()
 
-        # Handle en passant
-        if square // 8 == self.all_bitboards[
-            9
-        ] // 8 and (  # TODO: En passant not added to list of legal moves
-            np.uint64(1 << square - 1) & (np.uint64(1) << self.all_bitboards[9])
-            or np.uint64(1 << square + 1) & (np.uint64(1) << self.all_bitboards[9])
-        ):
-            move_list.insert(
-                0, f"{encode_square(square)}{encode_square(self.all_bitboards[9] + 8)}"
-            )
-
-        return move_list
+    def _legal_moves(self):
+        side, enemy = (WHITE, BLACK) if self.white_to_move else (BLACK, WHITE)
+        for move in self._candidates(side, enemy):
+            if self._keeps_king_safe(move, side, enemy):
+                yield move
 
     def generate_legal_moves(self):
-        move_list = []
+        return [_move_text(move) for move in self._legal_moves()]
 
-        for square in range(64):
-            if np.uint64(1 << square) & self.all_bitboards[6]:
-                piece = self.determine_piece_on_square(square)
+    def is_game_over(self):
+        """Return terminal status and a score from the side to move's perspective."""
+        if next(self._legal_moves(), None) is not None:
+            return False, 0
+        return True, -99999 if self.is_check() else 0
 
-                match piece:  # Insertion to order the moves
-                    case "K":
-                        move_list.extend(self.generate_king_moves(square))
-                    case "Q":
-                        move_list.extend(self.generate_orthogonal_moves(square))
-                        move_list.extend(self.generate_diagonal_moves(square))
-                    case "R":
-                        move_list.extend(self.generate_orthogonal_moves(square))
-                    case "B":
-                        move_list.extend(self.generate_diagonal_moves(square))
-                    case "N":
-                        move_list.extend(self.generate_knight_moves(square))
-                    case "P":
-                        move_list.extend(self.generate_pawn_moves(square))
-                        
-        self.legal_moves = np.array(move_list).flatten()
+    def perft(self, depth):
+        if depth < 0:
+            raise ValueError("Perft depth must be non-negative")
+        if depth == 0:
+            return 1
+        if depth == 1:
+            return sum(1 for _ in self._legal_moves())
+        count = 0
+        for move in self._legal_moves():
+            self._push(move)
+            try:
+                count += self.perft(depth - 1)
+            finally:
+                self.undo_move()
+        return count
 
-        return self.legal_moves
-
-    def flip_bitboard(
-        self, bitboard
-    ):  # Flips a bitboard to be from black's perspective
-
-        h1 = np.uint64(0x5555555555555555)
-        h2 = np.uint64(0x3333333333333333)
-        h4 = np.uint64(0x0F0F0F0F0F0F0F0F)
-        v1 = np.uint64(0x00FF00FF00FF00FF)
-        v2 = np.uint64(0x0000FFFF0000FFFF)
-
-        bitboard = ((bitboard >> np.uint64(1)) & h1) | ((bitboard & h1) << np.uint64(1))
-        bitboard = ((bitboard >> np.uint64(2)) & h2) | ((bitboard & h2) << np.uint64(2))
-        bitboard = ((bitboard >> np.uint64(4)) & h4) | ((bitboard & h4) << np.uint64(4))
-        bitboard = ((bitboard >> np.uint64(8)) & v1) | ((bitboard & v1) << np.uint64(8))
-        bitboard = ((bitboard >> np.uint64(16)) & v2) | (
-            (bitboard & v2) << np.uint64(16)
-        )
-        bitboard = (bitboard >> np.uint64(32)) | (bitboard << np.uint64(32))
-        return bitboard & np.uint64(0xFFFFFFFFFFFFFFFF)
-
-    def flip_board(self):  # Flips each board to be from blacks perspective
-        for i in range(len(self.all_bitboards)):
-            self.all_bitboards[i] = self.flip_bitboard(self.all_bitboards[i])
-
-        white = self.all_bitboards[6].copy()
-        self.all_bitboards[6] = self.all_bitboards[7].copy()
-        self.all_bitboards[7] = white.copy()
+    def perft_divide(self, depth):
+        if depth < 1:
+            raise ValueError("Perft divide depth must be positive")
+        counts = {}
+        for move in self._legal_moves():
+            self._push(move)
+            try:
+                counts[_move_text(move)] = self.perft(depth - 1)
+            finally:
+                self.undo_move()
+        return counts
 
     def display_board(self):
-        fen = bitboards_to_fen(self.all_bitboards[:10])
-        print(display_chess_position(fen))
+        print(str(self))
 
-    def __repr__(self) -> str:
-        fen = bitboards_to_fen(self.all_bitboards[:10])
-        return display_chess_position(fen)
+    def __repr__(self):
+        return display_chess_position(self.to_fen())
 
-    def __str__(self) -> str:
-        fen = bitboards_to_fen(self.all_bitboards[:10])
-        return display_chess_position(fen)
+    __str__ = __repr__
