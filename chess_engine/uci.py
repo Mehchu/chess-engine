@@ -36,20 +36,22 @@ def _parse_position(tokens):
 
 
 def _parse_go(tokens):
-    supported = {"depth", "movetime", "wtime", "btime", "winc", "binc", "movestogo"}
+    if not tokens or tokens == ["infinite"]:
+        return {}
+    supported = {"depth", "nodes", "movetime", "wtime", "btime", "winc", "binc", "movestogo"}
     if len(tokens) % 2:
         raise ValueError("Search limits require a name and an integer")
     limits = {}
     for name, value in zip(tokens[::2], tokens[1::2]):
         if name not in supported or name in limits:
             raise ValueError(f"Unsupported or repeated search limit: {name}")
-        minimum = 1 if name in ("depth", "movestogo") else 0
+        minimum = 1 if name in ("depth", "nodes", "movestogo") else 0
         limit = int(value)
         if limit < minimum:
             raise ValueError(f"{name} must be at least {minimum}")
         limits[name] = limit
-    if not limits.keys() & {"depth", "movetime", "wtime", "btime"}:
-        raise ValueError("Expected a depth, move time, or clock limit")
+    if not limits.keys() & {"depth", "nodes", "movetime", "wtime", "btime"}:
+        raise ValueError("Expected a depth, node, move-time, or clock limit")
     return limits
 
 
@@ -90,27 +92,43 @@ class UciEngine:
         with self._output_lock:
             print(message, file=self._output, flush=True)
 
-    def _search(self, board, max_depth, deadline):
+    def _search(self, board, limits, deadline):
         moves = board.generate_legal_moves()
-        if not moves or board.automatic_draw_reason() is not None:
+        if not moves:
             self._send("bestmove 0000")
             return
+
         best_move = moves[0]
+        if board.automatic_draw_reason() is not None:
+            self._send("info depth 0 score cp 0 nodes 0")
+            self._send(f"bestmove {best_move}")
+            return
+
+        node_limit = limits.get("nodes")
+        max_depth = limits.get("depth")
+
         def should_stop():
-            return self._stop.is_set() or (deadline is not None and monotonic_ns() >= deadline)
+            return (self._stop.is_set()
+                    or (deadline is not None and monotonic_ns() >= deadline)
+                    or (node_limit is not None and control.nodes >= node_limit))
 
         control = SearchControl(should_stop=should_stop)
         table = TranspositionTable()
         depths = count(1) if max_depth is None else range(1, max_depth + 1)
         try:
             for depth in depths:
-                best_move, score = negamax_alpha_beta_top(
+                move, score = negamax_alpha_beta_top(
                     board, depth, table=table, control=control
                 )
-                self._send(f"info depth {depth} score {_score_text(score)} nodes {control.nodes}")
+                if move not in moves:
+                    raise RuntimeError(f"Search returned an illegal root move: {move}")
+                best_move = move
+                self._send(f"info depth {depth} score {_score_text(score)} "
+                           f"nodes {control.nodes} pv {best_move}")
         except SearchStopped:
             pass
-        self._send(f"bestmove {best_move}")
+        finally:
+            self._send(f"bestmove {best_move}")
 
     def _stop_search(self):
         if self._worker is not None:
@@ -126,7 +144,7 @@ class UciEngine:
         budget = _time_budget_ms(limits, self.board.white_to_move)
         deadline = None if budget is None else monotonic_ns() + budget * 1_000_000
         self._stop.clear()
-        self._worker = Thread(target=self._search, args=(self.board, limits.get("depth"), deadline))
+        self._worker = Thread(target=self._search, args=(self.board, limits, deadline))
         self._worker.start()
 
     def run(self, commands):

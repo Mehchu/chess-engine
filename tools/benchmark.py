@@ -6,6 +6,7 @@ import os
 import platform
 import subprocess
 from pathlib import Path
+from statistics import median
 from time import perf_counter
 
 from chess_engine.board_representation import ChessBoard
@@ -75,6 +76,27 @@ def _run_case(name, fen, perft_depth, expected_perft, search_depth):
     }
 
 
+def _summarise(runs):
+    def medians(samples):
+        return {
+            "nodes": samples[0]["nodes"],
+            "median_seconds": median(sample["seconds"] for sample in samples),
+            "median_nodes_per_second": median(sample["nodes_per_second"] for sample in samples),
+        }
+
+    return [
+        {
+            "position": cases[0]["position"],
+            "perft": medians([case["perft"] for case in cases]),
+            "search": {
+                mode: medians([case["search"][mode] for case in cases])
+                for mode in ("uncached", "fresh_table")
+            },
+        }
+        for cases in zip(*runs)
+    ]
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repeat", type=int, default=1)
@@ -84,7 +106,7 @@ def main():
 
     environment = _environment()
     runs = [[_run_case(*case) for case in CORPUS] for _ in range(args.repeat)]
-    print(json.dumps({"environment": environment, "runs": runs}, indent=2))
+    print(json.dumps({"environment": environment, "summary": _summarise(runs), "runs": runs}, indent=2))
 
 
 if __name__ == "__main__":

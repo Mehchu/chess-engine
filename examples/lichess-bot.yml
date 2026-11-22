@@ -1,0 +1,23 @@
+# Supply the real token through LICHESS_BOT_TOKEN in the bot bridge's environment.
+token: ""
+url: "https://lichess.org/"
+
+engine:
+  dir: "/absolute/path/to/chess-engine/bin"
+  name: "chess-engine-uci.sh"
+  protocol: "uci"
+  ponder: false
+  uci_ponder: false
+
+challenge:
+  concurrency: 1
+  variants:
+    - "standard"
+  time_controls:
+    - "rapid"
+    - "classical"
+  modes:
+    - "casual"
+
+matchmaking:
+  allow_matchmaking: false

@@ -9,3 +9,11 @@ __pycache__/
 .coverage.*
 htmlcov/
 *.prof
+
+# Local bot configuration and environment files
+/lichess-bot.yml
+/lichess-bot.yaml
+/config.yml
+/config.yaml
+.env
+.env.*

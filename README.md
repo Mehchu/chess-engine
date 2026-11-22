@@ -35,14 +35,18 @@ Press Enter to load the standard starting position, or enter a FEN string to exp
 
 ## UCI
 
-Run `python -m uci` from the repository root. The engine accepts
+Register `bin/chess-engine-uci.sh` as the engine executable in a Linux GUI,
+or run `python -m uci` from the repository root. The engine accepts
 `uci`, `isready`, `ucinewgame`, `position startpos`, `position fen`,
 `go`, `stop`, and `quit`. Both position forms accept a suffix such as
 `moves e2e4 e7e5`. Use `go depth N` for fixed-depth analysis,
 `go movetime N` for a per-move budget in milliseconds, or
 `go wtime 60000 btime 60000 winc 1000 binc 1000` for clock-managed play.
-Clock-managed searches also accept `movestogo`. A depth limit can be combined
-with a time limit. Pondering and engine options remain unsupported.
+Clock-managed searches also accept `movestogo`. A depth or node limit can be
+combined with a time limit. Use `go infinite` for analysis until `stop`.
+Pondering, restricted root moves, and engine options remain unsupported.
+For bot setup, see the [Lichess guide](docs/DEVELOPMENT.md#lichess-bot)
+and [example configuration](examples/lichess-bot.yml).
 [UCI protocol reference](https://www.wbec-ridderkerk.nl/html/UCIProtocol.html)
 
 The board API detects threefold and 50-move claims, including an intended move.
@@ -56,14 +60,17 @@ and move counters. [FIDE Laws of Chess, Articles 9.2–9.6](https://handbook.fid
 | Path | Contents |
 | --- | --- |
 | [`chess_engine/`](chess_engine/) | Position state, move generation, FEN, evaluation, search, and interfaces |
-| [`tools/`](tools/) | Performance benchmarks and evaluation experiments |
+| [`tools/`](tools/) | Speed benchmarks, paired UCI matches, and evaluation experiments |
 | `main.py`, `uci.py`, `benchmark.py`, `tune_evaluation.py` | Root launchers for the existing run commands |
+| `bin/`, `examples/` | Linux engine launcher and token-free lichess-bot configuration |
 | `tests/` | Regression tests, perft, and python-chess comparisons |
 | `docs/` | Development instructions, engineering decisions, and square index reference |
 
 See the [development guide](docs/DEVELOPMENT.md) for test and benchmark commands,
 the [roadmap](docs/ROADMAP.md) for priorities, and the [progress log](docs/PROGRESS.md)
-for measurements and verification.
+for measurements and verification. Run `python -m benchmark --repeat 3`
+to measure speed, or follow the [paired match instructions](docs/DEVELOPMENT.md#relative-playing-strength)
+to compare playing strength against a reference executable.
 
 ## Technical focus
 

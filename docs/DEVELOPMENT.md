@@ -35,7 +35,37 @@ and Kiwipete, with the cache disabled and freshly initialised. It records
 the Git revision, dirty-tree status, interpreter, and hardware details.
 Perft counts leaf positions. Search counts visited nodes, including
 transposition-table hits. Compare repeated runs on the same machine and
-check node counts and scores alongside elapsed time.
+check node counts and scores alongside elapsed time. The summary reports
+median elapsed time and median nodes per second, and the report keeps every
+individual run.
+
+### Relative playing strength
+
+Build or check out a reference engine separately, then pass its UCI executable
+as the opponent. For a fair comparison, give both engines the same limit.
+
+```sh
+python -m tools.match_benchmark --opponent /path/to/reference-engine --depth 3
+python -m tools.match_benchmark --opponent /path/to/reference-engine --movetime-ms 100
+```
+
+The candidate defaults to this repository's Linux launcher. Override it with
+`--candidate` to compare other executables. Each starting FEN is played twice,
+with the engine colours reversed. The report shows wins, draws, losses, games
+that hit the ply cap, and the candidate's points fraction over completed pairs.
+It also reports median and maximum move latency, including UCI communication.
+Use `--positions` with one playable FEN per line to expand the default corpus.
+Use larger position sets for strength comparisons. The small default corpus is
+a screening benchmark and does not provide an Elo estimate.
+
+For a quick check using the same build on both sides, compare depth two
+against depth one.
+
+```sh
+python -m tools.match_benchmark --opponent bin/chess-engine-uci.sh \
+  --depth 2 --opponent-depth 1 --max-plies 100
+```
+
 
 ## Evaluation experiments
 
@@ -50,13 +80,41 @@ a validation suite, or a custom FEN list.
 
 ## UCI clients
 
-Launch the engine with the virtual environment's interpreter and run
-`python -m uci` from the repository root. A client should send `uci` and
-`isready` before setting a position and searching it.
+Select the absolute path to `bin/chess-engine-uci.sh` as the engine executable in
+your Linux GUI. The launcher works from any working directory. It uses the
+repository's `.venv` when present, then falls back to `python3`. Set
+`CHESS_ENGINE_PYTHON` to use a different interpreter with NumPy installed.
+You can also run `python -m uci` from the repository root.
 
-A Lichess deployment requires a separate bridge, such as lichess-bot, plus
-its own account and configuration. Local UCI tests verify the engine side
-of that connection. See the [lichess-bot configuration guide](https://github.com/lichess-bot-devs/lichess-bot/wiki/Configure-lichess-bot).
+A client can send `uci`, `isready`, and then a position such as
+`position startpos moves e2e4 e7e5`. Use `go depth 3` for fixed-depth search
+or `go infinite` and `stop` for analysis. The engine returns one `bestmove`
+per search. It uses `0000` when no legal move exists.
+
+## Lichess bot
+
+Install the [lichess-bot bridge](https://github.com/lichess-bot-devs/lichess-bot)
+separately. Copy the [example configuration](../examples/lichess-bot.yml)
+to a location outside this repository. Set `engine.dir` to the absolute path
+to this repository's `bin` directory and leave `engine.name` set to
+`chess-engine-uci.sh`. The example uses standard chess and disables pondering
+and matchmaking.
+
+Supply your bot account's token to the bridge using `LICHESS_BOT_TOKEN`.
+Leave the YAML token field empty. For example, from the lichess-bot checkout
+with its environment active, use Bash to enter the token without showing it
+or putting it in the command history.
+
+```bash
+read -rsp 'Lichess bot token: ' LICHESS_BOT_TOKEN
+printf '\n'
+export LICHESS_BOT_TOKEN
+python lichess-bot.py --config /path/outside/the/repository/lichess-bot.yml
+unset LICHESS_BOT_TOKEN
+```
+
+See the [bridge configuration guide](https://github.com/lichess-bot-devs/lichess-bot/wiki/Configure-lichess-bot)
+and [environment override](https://github.com/lichess-bot-devs/lichess-bot/blob/master/lib/config.py#L401-L422).
 
 ## Board indexing
 

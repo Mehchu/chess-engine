@@ -4,6 +4,7 @@ import sys
 import threading
 import unittest
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from time import monotonic
 
 import chess
@@ -153,10 +154,50 @@ class UciTests(unittest.TestCase):
         self.assertTrue(self.receive().startswith("info depth 1 "))
         self.assertTrue(self.receive().startswith("bestmove "))
 
-    def test_automatic_draw_with_legal_moves_returns_null_move(self):
-        self.send("position fen 4k3/8/8/8/3Q4/8/8/4K3 w - - 150 1")
+    def test_complete_history_is_used_for_repetition(self):
+        cycle = "g1f3 g8f6 f3g1 f6g8".split()
+        history = cycle * 4
+        self.send("position startpos moves " + " ".join(history))
         self.send("go depth 2")
-        self.assertEqual(self.receive_best_move(), "bestmove 0000")
+        self.assertEqual(self.receive(), "info depth 0 score cp 0 nodes 0")
+        board = chess.Board()
+        for move in history:
+            board.push_uci(move)
+        self.assertTrue(board.is_fivefold_repetition())
+        self.assert_best_move(board)
+
+    def test_fen_history_replays_special_move_notation(self):
+        cases = (
+            ("r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1", "e1g1 e8c8"),
+            ("4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 1", "e5d6 e8d7"),
+            ("4k3/P7/8/8/8/8/8/4K3 w - - 0 1", "a7a8n"),
+        )
+        for fen, history in cases:
+            with self.subTest(history=history):
+                self.send(f"position fen {fen} moves {history}")
+                self.send("go depth 1")
+                board = chess.Board(fen)
+                for move in history.split():
+                    board.push_uci(move)
+                self.assert_best_move(board)
+
+    def test_automatic_draw_with_legal_moves_returns_a_legal_move(self):
+        fen = "4k3/8/8/8/3Q4/8/8/4K3 w - - 150 1"
+        self.send(f"position fen {fen}")
+        self.send("go depth 2")
+        self.assert_best_move(chess.Board(fen))
+
+    def test_infinite_analysis_stops_with_one_legal_move(self):
+        self.send("go infinite")
+        self.assertTrue(self.receive().startswith("info depth 1 "))
+        self.send("stop")
+        self.assert_best_move(chess.Board())
+        self.send("isready")
+        self.assertEqual(self.receive(), "readyok")
+
+    def test_node_limit_returns_legal_fallback(self):
+        self.send("go nodes 1")
+        self.assert_best_move(chess.Board())
 
     def test_bad_position_is_atomic_and_diagnostics_stay_off_stdout(self):
         fen = "4k3/8/8/8/8/8/4P3/4K3 w - - 0 1"
@@ -175,8 +216,9 @@ class TimeBudgetTests(unittest.TestCase):
     def test_invalid_limits_are_rejected(self):
         from chess_engine.uci import _parse_go, _time_budget_ms
 
-        for args in ([], ["wtime"], ["depth", "0"], ["movetime", "-1"],
-                     ["movestogo", "0"], ["depth", "1", "depth", "2"]):
+        for args in (["wtime"], ["depth", "0"], ["movetime", "-1"],
+                     ["movestogo", "0"], ["depth", "1", "depth", "2"],
+                     ["nodes", "0"], ["infinite", "depth", "1"]):
             with self.subTest(args=args), self.assertRaises(ValueError):
                 _parse_go(args)
         with self.assertRaisesRegex(ValueError, "Missing btime"):
@@ -191,3 +233,16 @@ class TimeBudgetTests(unittest.TestCase):
         self.assertEqual(_time_budget_ms({**clocks, "movestogo": 1}, False), 950)
         self.assertEqual(_time_budget_ms({**clocks, "movetime": 10}, False), 10)
         self.assertIsNone(_time_budget_ms({"depth": 4}, True))
+
+
+@unittest.skipUnless(sys.platform.startswith("linux"), "Linux engine launcher")
+class LinuxLauncherTests(unittest.TestCase):
+    def test_launches_from_another_working_directory(self):
+        launcher = Path(__file__).resolve().parents[1] / "bin" / "chess-engine-uci.sh"
+        with TemporaryDirectory() as working_dir:
+            result = subprocess.run(
+                [launcher], cwd=working_dir, input="uci\nisready\nquit\n",
+                text=True, capture_output=True, check=True, timeout=5,
+            )
+        self.assertEqual(result.stdout.splitlines()[-2:], ["uciok", "readyok"])
+        self.assertEqual(result.stderr, "")

@@ -137,3 +137,17 @@ Suggested commit `test: add paired self-play for evaluation weights`.
 - All 51 tests passed. The benchmark returned 197,281 and 97,862 perft nodes for the starting position and Kiwipete. The interactive CLI, evaluation runner, and fixed-depth and timed UCI client checks completed locally.
 - The current checkout contains the UCI engine. Live Lichess verification requires the separate bot bridge and its configuration.
 - Grouped engine modules under `chess_engine/` and development programs under `tools/`. Updated project imports and kept the root launch commands as thin wrappers. Python callers now import engine modules through `chess_engine`.
+
+### UCI launcher and lichess-bot setup
+
+- Added an executable Linux launcher and a token-free lichess-bot configuration. The launcher resolves the repository from its own path and keeps the bridge's token out of the engine subprocess.
+- Added infinite analysis and node limits. Search reports its completed root move and only emits `0000` when there are no legal moves. An automatic draw with legal moves reports a zero score and returns a legal move.
+- Extended subprocess tests to cover full repetition histories, special moves replayed from FEN, infinite search, node limits, and launching from another directory. A local UCI client also exercised clocked play and infinite analysis through the launcher.
+- The example follows the bridge's configuration schema. A live authenticated Lichess game remains unverified.
+
+### Speed and relative strength benchmarks
+
+- Added median elapsed time and nodes per second to the existing perft and search report. Added a paired UCI match runner with fixed-depth and equal-move-time options, legal-move validation, per-engine latency, and separate reporting for unfinished games.
+- Three speed runs gave median perft rates of about 418,000 nodes/s from the starting position and 547,000 nodes/s on Kiwipete. Median uncached depth-three search took 21 ms and 149 ms, respectively.
+- A depth-two versus depth-one check with the same engine recorded 10 wins, three draws, zero losses, and three unfinished games from eight starting positions. The candidate scored 90% over the five completed pairs. This checks that the harness distinguishes search limits. It does not measure an engine revision or estimate Elo. The equal-time smoke test also completed.
+- All 58 tests passed, including a subprocess match that verifies colour swapping and result reporting.
