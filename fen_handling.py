@@ -137,20 +137,20 @@ def bitboards_to_fen(bitboards):
 
 def display_chess_position(fen):
 
-    # Create a mapping for piece characters
+    # Render White as filled glyphs and Black as outlined glyphs in the CLI.
     piece_mapping = {
-        "R": "♖",
-        "N": "♘",
-        "B": "♗",
-        "Q": "♕",
-        "K": "♔",
-        "P": "♙",
-        "r": "♜",
-        "n": "♞",
-        "b": "♝",
-        "q": "♛",
-        "k": "♚",
-        "p": "♟",
+        "R": "♜",
+        "N": "♞",
+        "B": "♝",
+        "Q": "♛",
+        "K": "♚",
+        "P": "♟",
+        "r": "♖",
+        "n": "♘",
+        "b": "♗",
+        "q": "♕",
+        "k": "♔",
+        "p": "♙",
         ".": "·",
     }
 
