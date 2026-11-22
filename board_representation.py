@@ -82,8 +82,13 @@ class ChessBoard:
         return self._boards[WHITE] | self._boards[BLACK]
 
     @property
+    def piece_bitboards(self):
+        """Return the six piece-type masks followed by White and Black masks."""
+        return tuple(self._boards)
+
+    @property
     def all_bitboards(self):
-        """Provide the prototype search with its legacy array layout."""
+        """Provide the original NumPy array layout for compatibility."""
         import numpy as np
 
         return np.array(

@@ -34,15 +34,15 @@ Keep the existing material and piece-square baseline, verify table orientation, 
 
 **Acceptance.** Compare both searches with a small independent minimax on forced mates, stalemates, and material positions for either side. Compare scores and membership in the set of equally best legal moves. Verify position and history restoration after normal searches and cutoffs.
 
-## 5. Zobrist keys and transposition table (next)
+## 5. Zobrist keys and transposition table (verified)
 
-**Findings.** The prototype XORs products of whole bitboards and random values. It omits explicit side to move and stores all scores as exact, including cutoff bounds.
+**Implementation.** Recompute a seeded 64-bit key from colour, piece, square, turn, castling, and the raw FEN en passant target. Key table entries by that hash, halfmove clock, and exact remaining depth. Use exact, lower, and upper bounds classified against the original window. Normalise mate scores relative to the cached position.
 
-Start with deterministic recomputation from colour, piece, square, side to move, castling rights, and en passant state. Define the en passant policy for repetition identity explicitly. Account for rule-50 clocks and path-dependent repetition when deciding whether an entry can be reused. Store depth and exact, lower, or upper bounds. Classify against the original search window and normalise mate distance across plies.
+**Draw policy.** This cache applies to the current search rules, which end on checkmate or stalemate. A future repetition key should include the en passant target only when a legal en passant capture is available. Before adding repetition adjudication, include the relevant history in table reuse decisions or bypass score reuse where history can affect the result.
 
 **Acceptance.** Changing each relevant field changes the key on targeted fixtures. Undo restores the key. With the table enabled, full-window scores agree with uncached search. Narrow-window tests cover both bound directions, and shallow entries cannot cut off deeper searches. If incremental hashing is added later, compare it with recomputation after every move and undo.
 
-## 6. Benchmarks and UCI
+## 6. Benchmarks and UCI (next)
 
 **Findings.** The interactive CLI searches at a fixed depth and `Timer` prints elapsed time. There is no reproducible benchmark or UCI command loop.
 

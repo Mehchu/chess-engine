@@ -1,36 +1,82 @@
+from dataclasses import dataclass
+from enum import Enum, auto
+from random import Random
+
 from evaluation_functions import EvaluationFunction
-import numpy as np
-
-
-class TranspositionTable:  # Class for storing previously evaluated positions to save on computations at higher depths
-    def __init__(self):
-        self.table = (
-            {}
-        )  # Initialises a dictionary to store the hashed key and depth and evaluation
-
-    def lookup(
-        self, key
-    ):  # Method to fetch the data related to the unique hash of the position
-        return self.table.get(key)
-
-    def store(
-        self, key, score, depth
-    ):  # Stores an evaluated position in the dictionary with relevant information
-        self.table[key] = {"score": score, "depth": depth}
-
-
-class ZobristHash:  # Hashing algorithm to uniquely hash a ChessBoard objects's array of 13 bitboards
-    def __init__(self, shape=(13,)):
-        self.keys = np.random.randint(
-            2**64, size=shape, dtype=np.uint64
-        )  # Assigns each bitboard a random integer
-
-    def generate_key(self, position):  # Hashes the array of bitboards to a unique key
-        return np.bitwise_xor.reduce(position * self.keys)
-
 
 MATE_SCORE = 100_000
+MATE_THRESHOLD = 90_000
 eval = EvaluationFunction()
+
+
+class ZobristHash:
+    """Recompute a 64-bit key from piece placement and rule state."""
+
+    def __init__(self):
+        rng = Random(0x5A4F4252495354)
+        self._pieces = tuple(
+            tuple(tuple(rng.getrandbits(64) for _ in range(64)) for _ in range(6))
+            for _ in range(2)
+        )
+        self._black_to_move = rng.getrandbits(64)
+        self._castling = tuple(rng.getrandbits(64) for _ in range(16))
+        self._en_passant = tuple(rng.getrandbits(64) for _ in range(64))
+
+    def generate_key(self, board):
+        boards = board.piece_bitboards
+        key = self._castling[board.castling_rights]
+        if not board.white_to_move:
+            key ^= self._black_to_move
+        # Keep the raw FEN target, even when no legal capture is available.
+        if board.en_passant is not None:
+            key ^= self._en_passant[board.en_passant]
+        for colour, occupancy in enumerate(boards[6:]):
+            for piece, piece_mask in enumerate(boards[:6]):
+                mask = occupancy & piece_mask
+                while mask:
+                    bit = mask & -mask
+                    key ^= self._pieces[colour][piece][bit.bit_length() - 1]
+                    mask ^= bit
+        return key
+
+
+class Bound(Enum):
+    EXACT = auto()
+    LOWER = auto()
+    UPPER = auto()
+
+
+@dataclass(frozen=True)
+class TranspositionEntry:
+    move: str | None
+    score: float
+    bound: Bound
+
+
+class TranspositionTable:
+    """Cache entries for one evaluation and draw policy at fixed search depths."""
+
+    def __init__(self):
+        self._hasher = ZobristHash()
+        self._entries = {}
+
+    def key_for(self, board):
+        return self._hasher.generate_key(board), board.halfmove_clock
+
+    def lookup(self, key, depth):
+        # Different horizons can yield different fixed-depth scores.
+        return self._entries.get((key, depth))
+
+    def store(self, key, depth, entry):
+        self._entries[key, depth] = entry
+
+
+def _adjust_mate_score(score, ply_offset):
+    if score >= MATE_THRESHOLD:
+        return score + ply_offset
+    if score <= -MATE_THRESHOLD:
+        return score - ply_offset
+    return score
 
 
 def _moves_or_score(board, depth, ply):
@@ -73,21 +119,45 @@ def _negamax(board, depth, ply):
     return best_move, best_score
 
 
-def negamax_alpha_beta_top(board, depth, alpha=-float("inf"), beta=float("inf")):
+def negamax_alpha_beta_top(board, depth, alpha=-float("inf"), beta=float("inf"), *, table=None):
     """Return a move and side-to-move score, or a bound outside the window."""
     if depth < 0:
         raise ValueError("Search depth must be non-negative")
     if not alpha < beta:
         raise ValueError("Alpha must be less than beta")
-    return _alpha_beta(board, depth, alpha, beta, 0)
+    return _alpha_beta(board, depth, alpha, beta, 0, table)
 
 
-def negamax_alpha_beta(board, depth, alpha=-float("inf"), beta=float("inf")):
+def negamax_alpha_beta(board, depth, alpha=-float("inf"), beta=float("inf"), *, table=None):
     """Return just the root score or bound."""
-    return negamax_alpha_beta_top(board, depth, alpha, beta)[1]
+    return negamax_alpha_beta_top(board, depth, alpha, beta, table=table)[1]
 
 
-def _alpha_beta(board, depth, alpha, beta, ply):
+def _alpha_beta(board, depth, alpha, beta, ply, table):
+    if table is None:
+        return _search_node(board, depth, alpha, beta, ply, table)
+
+    key = table.key_for(board)
+    entry = table.lookup(key, depth)
+    if entry is not None:
+        score = _adjust_mate_score(entry.score, -ply)
+        if (entry.bound is Bound.EXACT
+                or (entry.bound is Bound.LOWER and score >= beta)
+                or (entry.bound is Bound.UPPER and score <= alpha)):
+            return entry.move, score
+
+    move, score = _search_node(board, depth, alpha, beta, ply, table)
+    if score <= alpha:
+        bound = Bound.UPPER
+    elif score >= beta:
+        bound = Bound.LOWER
+    else:
+        bound = Bound.EXACT
+    table.store(key, depth, TranspositionEntry(move, _adjust_mate_score(score, ply), bound))
+    return move, score
+
+
+def _search_node(board, depth, alpha, beta, ply, table):
     moves, score = _moves_or_score(board, depth, ply)
     if score is not None:
         return None, score
@@ -96,7 +166,7 @@ def _alpha_beta(board, depth, alpha, beta, ply):
     for move in moves:
         board.make_move(move)
         try:
-            _, child_score = _alpha_beta(board, depth - 1, -beta, -alpha, ply + 1)
+            _, child_score = _alpha_beta(board, depth - 1, -beta, -alpha, ply + 1, table)
         finally:
             board.undo_move()
 

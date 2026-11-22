@@ -7,12 +7,12 @@ A Python chess-engine prototype exploring bitboard representations, game-tree se
 - 64-square integer bitboards for piece placement and occupancy.
 - Move generation for all six piece types, including promotion candidates.
 - FEN position parsing and terminal board visualisation.
-- Uncached negamax search with optional alpha–beta pruning.
+- Negamax and alpha–beta search with an optional transposition table.
 - Material and piece-square-table evaluation.
-- Prototype position hashing and transposition-table caching.
+- Deterministic Zobrist position hashing and depth-qualified cache bounds.
 - Interactive command-line interface with search timing.
 
-**Status:** early-stage experimental engine. Legal moves and position restoration are covered by perft and python-chess comparisons. Uncached search is checked against independent minimax. Draw adjudication beyond stalemate, transposition-table correctness, and UCI support remain in development.
+**Status:** early-stage experimental engine. Legal moves and position restoration are covered by perft and python-chess comparisons. Uncached search is checked against independent minimax. Cached search is checked against the uncached baseline. Draw adjudication beyond stalemate, benchmarking, and UCI support remain in development.
 
 ## Getting started
 
@@ -52,7 +52,7 @@ See [the detailed roadmap](docs/ROADMAP.md) and [development progress](docs/PROG
 - [x] Correct position state, make/undo and FEN round trips.
 - [x] Verify legal move generation, including checks, castling and en passant, with perft and python-chess.
 - [x] Verify negamax and alpha–beta against an independent reference search.
-- [ ] Correct transposition table keys and bound handling.
+- [x] Verify transposition-table keys and bound handling.
 - [ ] Introduce iterative deepening, move ordering and quiescence search.
 - [ ] Benchmark search throughput and document measured improvements.
 - [ ] Add UCI support for use with external chess interfaces.

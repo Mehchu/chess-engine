@@ -1,7 +1,7 @@
 from board_representation import ChessBoard
 from fen_handling import InvalidFEN
 from notation_handling import InvalidNotation
-from search_algorithms import negamax_alpha_beta_top
+from search_algorithms import TranspositionTable, negamax_alpha_beta_top
 from timer import Timer
 
 STARTING_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"  # Default starting chess position
@@ -64,7 +64,7 @@ def playGame(board: ChessBoard):
             return
 
         timer.start()
-        move, score = negamax_alpha_beta_top(board, depth)
+        move, score = negamax_alpha_beta_top(board, depth, table=TranspositionTable())
         timer.stop()
         print(f"The evaluation is {-score / 100}")
         board.make_move(move)

@@ -24,3 +24,11 @@
 - Removed the colour parameter from the search API because the evaluator already returns a side-to-move score. The CLI uses uncached alpha–beta at the existing two-ply setting. The experimental hash and table classes remain available for the next milestone.
 - Checked both searches against a small White-relative minimax using python-chess for test positions and moves. Covered both colours, horizon terminal states, optimal-move sets, fail-high and fail-low bounds, evaluator orientation, and restoration after cutoffs and evaluation exceptions.
 - Next milestone is deterministic Zobrist keys and a depth-qualified transposition table, with uncached alpha–beta as the comparison baseline.
+
+### Zobrist hashing and transposition bounds
+
+- Replaced the prototype whole-mask hash with deterministic piece-square Zobrist keys. Side to move, castling rights, and the raw en passant target contribute to the key. Make/undo round trips restore it for ordinary moves, castling, en passant, and promotion.
+- The table qualifies lookups by halfmove clock and exact remaining depth. Scores from different horizons can differ, so even a deeper entry cannot substitute for a shallower fixed-depth result. Bound entries cut off only when they prove the current window fails. Mate scores are converted between root-relative and position-relative distances.
+- The CLI creates a fresh table for each engine reply. Calling alpha–beta without a table still provides the uncached baseline.
+- Regression tests verify cold and warm reuse, exact-depth isolation, halfmove isolation, fail-high and fail-low handling, and a cached mate score reused at a different ply. Repetition adjudication still needs a history-aware reuse policy.
+- Next milestone is reproducible benchmarks and UCI support. Suggested commit `fix: add deterministic Zobrist keys and depth-qualified transposition bounds`.
