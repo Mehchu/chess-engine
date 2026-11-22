@@ -151,3 +151,41 @@ Suggested commit `test: add paired self-play for evaluation weights`.
 - Three speed runs gave median perft rates of about 418,000 nodes/s from the starting position and 547,000 nodes/s on Kiwipete. Median uncached depth-three search took 21 ms and 149 ms, respectively.
 - A depth-two versus depth-one check with the same engine recorded 10 wins, three draws, zero losses, and three unfinished games from eight starting positions. The candidate scored 90% over the five completed pairs. This checks that the harness distinguishes search limits. It does not measure an engine revision or estimate Elo. The equal-time smoke test also completed.
 - All 58 tests passed, including a subprocess match that verifies colour swapping and result reporting.
+
+### Strength at different search limits
+
+- Ran six matches against the same engine at depth two using the executable UCI launcher. Each match used eight fixed positions, played once with each colour, and stopped unfinished games at 100 plies. Runs were sequential on CPython 3.14.8 and Linux x86-64, based on `61c6629`.
+- The match runner now records completed depths reported over UCI and allows a timed candidate against a fixed-depth opponent. Move latency includes UCI communication.
+
+| Candidate limit | Wins | Draws | Losses | Unfinished | Median move | Median reported depth |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Depth 1 | 0 | 3 | 10 | 3 | 1.7 ms | 1 |
+| Depth 2 | 3 | 4 | 3 | 6 | 5.5 ms | 2 |
+| Depth 3 | 8 | 1 | 1 | 6 | 21.5 ms | 3 |
+| 10 ms | 4 | 3 | 5 | 4 | 11.1 ms | 2 |
+| 35 ms | 6 | 1 | 0 | 9 | 36.1 ms | 3 |
+| 100 ms | 9 | 2 | 2 | 3 | 101.0 ms | 3 |
+
+- The 100 ms run completed depth four or higher on 253 of 537 candidate moves, compared with 115 of 717 for the 35 ms run. Depth three and 100 ms each scored more than half the available points even if all unfinished games are counted as losses. The 35 ms run had the most unfinished games, which limits comparison against other settings.
+- This measures performance against the depth-two anchor on the fixed corpus. An external baseline and a larger, more varied suite are needed for a rating estimate. See [the development guide](DEVELOPMENT.md#relative-playing-strength) for reproduction commands.
+
+### Stockfish reference match
+
+- Ran the Ubuntu `stockfish_17-1build1_amd64.deb` binary, which identifies itself as Stockfish 17.1. The opponent used `UCI_LimitStrength=true` and `UCI_Elo=1320`, its minimum advertised rating. Both engines received 100 ms per move. Each position was played with colours swapped, and unfinished games were capped at 120 plies.
+
+| Suite | Wins | Draws | Losses | Unfinished | Complete pairs |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Default eight positions | 7 | 1 | 2 | 6 | 3 |
+| Four opening positions | 2 | 0 | 4 | 2 | 2 |
+| Combined | 9 | 1 | 6 | 8 | 5 |
+
+- The candidate scored 5.5/10 over the five complete pairs. Applying the Elo logistic conversion to the nominal 1320 reference gives approximately 1355. For all 24 games, assigning every unfinished game a loss or a win yields nominal equivalents of approximately 1247 and 1492. This is sensitivity to the ply cap and does not quantify sampling or calibration uncertainty.
+- Stockfish calibrates its limiter under a different time control. The result describes this local match against a specific setting, with too few complete pairs for a dependable rating. [Stockfish UCI options](https://github-wiki-see.page/m/official-stockfish/Stockfish/wiki/UCI-Protocol-and-Stockfish-Commands#uci_elo)
+- Use the [development guide](DEVELOPMENT.md#relative-playing-strength) to reproduce the default suite. To reproduce the opening suite, add these FENs to a file and pass it with `--positions`.
+
+```text
+r1bqk2r/2ppbppp/p1n2n2/1p2p3/B3P3/5N2/PPPP1PPP/RNBQR1K1 w kq - 0 7
+rnbqkb1r/1p3ppp/p2p1n2/4p3/3NP3/2N5/PPP1BPPP/R1BQK2R w KQkq - 0 7
+rnbq1rk1/ppp1bpp1/4pn1p/3p2B1/2PP4/2N1PN2/PP3PPP/R2QKB1R w KQ - 0 7
+rnbq1rk1/ppp2pbp/3p1np1/4p3/2PPP3/2N2N2/PP2BPPP/R1BQK2R w KQ - 0 7
+```

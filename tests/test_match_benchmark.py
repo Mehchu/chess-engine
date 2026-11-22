@@ -37,4 +37,7 @@ class MatchBenchmarkTests(unittest.TestCase):
         self.assertEqual(result["results"]["losses"], 1)
         self.assertEqual(result["results"]["points_fraction_in_complete_pairs"], 0.5)
         self.assertEqual([engine["moves"] for engine in result["engines"]], [1, 1])
+        self.assertEqual([engine["median_reported_depth"] for engine in result["engines"]], [1, 1])
+        self.assertEqual([engine["moves_by_reported_depth"] for engine in result["engines"]],
+                         [{"1": 1}, {"1": 1}])
         self.assertTrue(all(game["termination"] == "checkmate" for game in result["pairs"][0]["games"]))

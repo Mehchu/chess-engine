@@ -53,7 +53,8 @@ The candidate defaults to this repository's Linux launcher. Override it with
 `--candidate` to compare other executables. Each starting FEN is played twice,
 with the engine colours reversed. The report shows wins, draws, losses, games
 that hit the ply cap, and the candidate's points fraction over completed pairs.
-It also reports median and maximum move latency, including UCI communication.
+It also reports median and maximum move latency, including UCI communication,
+and a histogram of the depths reported by each engine.
 Use `--positions` with one playable FEN per line to expand the default corpus.
 Use larger position sets for strength comparisons. The small default corpus is
 a screening benchmark and does not provide an Elo estimate.
@@ -66,6 +67,30 @@ python -m tools.match_benchmark --opponent bin/chess-engine-uci.sh \
   --depth 2 --opponent-depth 1 --max-plies 100
 ```
 
+
+To compare search limits against a fixed depth-two anchor, keep the position
+suite and ply cap identical across runs. For example, compare a depth limit
+and a per-move budget using the same build.
+
+```sh
+python -m tools.match_benchmark --opponent bin/chess-engine-uci.sh \
+  --depth 3 --opponent-depth 2 --max-plies 100
+python -m tools.match_benchmark --opponent bin/chess-engine-uci.sh \
+  --movetime-ms 35 --opponent-depth 2 --max-plies 100
+```
+
+To use a strength-limited Stockfish as the opponent, pass the nominal
+UCI rating explicitly. The report records both UCI options sent to the
+opponent.
+
+```sh
+python -m tools.match_benchmark --opponent /path/to/stockfish \
+  --opponent-elo 1320 --movetime-ms 100 --max-plies 120
+```
+
+Stockfish's UCI Elo is calibrated at a different time control. Treat these
+matches as comparisons against the stated build and setting. For details
+on the limiter, see the [Stockfish FAQ](https://official-stockfish.github.io/docs/stockfish-wiki/Stockfish-FAQ.html).
 
 ## Evaluation experiments
 

@@ -33,7 +33,7 @@ async def _engine(executable, timeout):
         transport.close()
 
 
-async def _play_game(fen, candidate_colour, engines, limits, latencies, max_plies, timeout):
+async def _play_game(fen, candidate_colour, engines, limits, timings, max_plies, timeout):
     board = chess.Board(fen)
     game = object()
 
@@ -44,9 +44,9 @@ async def _play_game(fen, candidate_colour, engines, limits, latencies, max_plie
         index = 0 if board.turn == candidate_colour else 1
         started = perf_counter()
         result = await asyncio.wait_for(
-            engines[index].play(board, limits[index], game=game), timeout
+            engines[index].play(board, limits[index], game=game, info=chess.engine.INFO_BASIC), timeout
         )
-        latencies[index].append(perf_counter() - started)
+        timings[index].append((perf_counter() - started, result.info.get("depth")))
 
         if result.move is None or result.move not in board.legal_moves:
             raise RuntimeError(f"Engine returned an illegal move in {board.fen()}: {result.move}")
@@ -81,25 +81,33 @@ def _summarise(pairs):
     }
 
 
-def _latency_summary(samples):
+def _timing_summary(samples):
+    latencies = [seconds for seconds, _ in samples]
+    depths = [depth for _, depth in samples if depth is not None]
     return {
         "moves": len(samples),
-        "median_move_seconds": median(samples) if samples else None,
-        "max_move_seconds": max(samples) if samples else None,
+        "median_move_seconds": median(latencies) if latencies else None,
+        "max_move_seconds": max(latencies) if latencies else None,
+        "median_reported_depth": median(depths) if depths else None,
+        "moves_by_reported_depth": dict(sorted(Counter(depths).items())),
     }
 
 
-async def _run_match(paths, positions, limits, max_plies, timeout):
+async def _run_match(paths, positions, limits, max_plies, timeout, opponent_elo=None):
     started = perf_counter()
-    latencies = ([], [])
+    timings = ([], [])
     pairs = []
     async with _engine(paths[0], timeout) as candidate, _engine(paths[1], timeout) as opponent:
+        opponent_options = {}
+        if opponent_elo is not None:
+            opponent_options = {"UCI_LimitStrength": True, "UCI_Elo": opponent_elo}
+            await asyncio.wait_for(opponent.configure(opponent_options), timeout)
         engines = (candidate, opponent)
         identities = [engine.id for engine in engines]
         for fen in positions:
             games = []
             for colour in (chess.WHITE, chess.BLACK):
-                game = await _play_game(fen, colour, engines, limits, latencies, max_plies, timeout)
+                game = await _play_game(fen, colour, engines, limits, timings, max_plies, timeout)
                 games.append({"candidate_colour": chess.COLOR_NAMES[colour], **game})
             pairs.append({"fen": fen, "games": games})
 
@@ -109,10 +117,12 @@ async def _run_match(paths, positions, limits, max_plies, timeout):
             {
                 "role": role, "executable": str(path.resolve()), "id": identity,
                 "limit": {"depth": limit.depth, "time_seconds": limit.time},
-                **_latency_summary(samples),
+                "uci_options": options,
+                **_timing_summary(samples),
             }
-            for role, path, identity, limit, samples in zip(
-                ("candidate", "opponent"), paths, identities, limits, latencies
+            for role, path, identity, limit, samples, options in zip(
+                ("candidate", "opponent"), paths, identities, limits, timings,
+                ({}, opponent_options)
             )
         ],
         "max_plies": max_plies,
@@ -128,8 +138,10 @@ def main():
     parser.add_argument("--opponent", type=Path, required=True)
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--depth", type=int, default=2, help="Candidate depth (also used for the opponent by default)")
-    group.add_argument("--movetime-ms", type=int, help="Identical per-move time budget for both engines")
-    parser.add_argument("--opponent-depth", type=int, help="Optional asymmetric depth for a smoke test")
+    group.add_argument("--movetime-ms", type=int, help="Candidate per-move time budget, shared by default")
+    parser.add_argument("--opponent-depth", type=int, help="Use fixed depth for the opponent instead of the shared limit")
+    parser.add_argument("--opponent-elo", type=int,
+                        help="Configure UCI_LimitStrength and UCI_Elo on the opponent")
     parser.add_argument("--max-plies", type=int, default=120)
     parser.add_argument("--timeout", type=float, default=10, help="Maximum wait per UCI operation in seconds")
     parser.add_argument("--positions", type=Path, help="Optional file with one FEN per line")
@@ -137,18 +149,22 @@ def main():
 
     if args.depth < 1 or args.max_plies < 1 or not 0 < args.timeout < float("inf"):
         parser.error("depth, max plies, and timeout must be positive and finite")
+    if args.opponent_elo is not None and args.opponent_elo < 1:
+        parser.error("opponent Elo must be positive")
+    if args.opponent_depth is not None and args.opponent_depth < 1:
+        parser.error("opponent depth must be positive")
     if args.movetime_ms is not None:
-        if args.movetime_ms < 1 or args.opponent_depth is not None:
-            parser.error("movetime must be positive and cannot be combined with opponent depth")
+        if args.movetime_ms < 1:
+            parser.error("movetime must be positive")
         seconds = args.movetime_ms / 1000
         if seconds >= args.timeout:
             parser.error("timeout must exceed the move-time budget")
-        limits = (chess.engine.Limit(time=seconds),) * 2
+        candidate_limit = chess.engine.Limit(time=seconds)
     else:
-        opponent_depth = args.opponent_depth if args.opponent_depth is not None else args.depth
-        if opponent_depth < 1:
-            parser.error("opponent depth must be positive")
-        limits = (chess.engine.Limit(depth=args.depth), chess.engine.Limit(depth=opponent_depth))
+        candidate_limit = chess.engine.Limit(depth=args.depth)
+    opponent_limit = (candidate_limit if args.opponent_depth is None
+                      else chess.engine.Limit(depth=args.opponent_depth))
+    limits = candidate_limit, opponent_limit
 
     try:
         positions = POSITIONS if args.positions is None else tuple(
@@ -159,7 +175,8 @@ def main():
         ):
             parser.error("positions must contain at least one valid, playable FEN")
         report = asyncio.run(_run_match(
-            (args.candidate, args.opponent), positions, limits, args.max_plies, args.timeout
+            (args.candidate, args.opponent), positions, limits, args.max_plies, args.timeout,
+            opponent_elo=args.opponent_elo,
         ))
     except (OSError, ValueError, RuntimeError, chess.engine.EngineError, asyncio.TimeoutError) as exc:
         parser.exit(1, f"Match benchmark failed: {str(exc) or type(exc).__name__}\n")
