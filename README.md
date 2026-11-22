@@ -33,7 +33,7 @@ for tests.
 
 Press Enter to load the standard starting position, or enter a FEN string to experiment with piece placement. Enter moves in coordinate notation, such as `e2e4`, or `exit` to quit. The current prototype searches at a fixed depth of four plies and prints an evaluation and elapsed search time. Both sides use standard board coordinates. For a promotion, append the piece letter, as in `e7e8q`.
 
-## UCI and benchmarks
+## UCI
 
 Run `python -m uci` from the repository root. The engine accepts
 `uci`, `isready`, `ucinewgame`, `position startpos`, `position fen`,
@@ -45,49 +45,25 @@ Clock-managed searches also accept `movestogo`. A depth limit can be combined
 with a time limit. Pondering and engine options remain unsupported.
 [UCI protocol reference](https://www.wbec-ridderkerk.nl/html/UCIProtocol.html)
 
-Run `python -m benchmark --repeat 2` to emit a JSON report for the starting
-position and Kiwipete. It records the Git revision and dirty status, Python
-and hardware details, perft counts, and depth-three search with the table
-disabled and freshly initialised. Perft counts leaf positions. Search
-counts every visited node, including transposition-table hits.
-
-With the development requirements installed, run `python -m tune_evaluation`
-to compare candidate evaluation weights in colour-swapped games. The JSON
-report includes each starting FEN and separates outright results from games
-that reached the ply cap.
-
 The board API detects threefold and 50-move claims, including an intended move.
 Search automatically ends only on the supported automatic rules. Claims are
 available to callers through the board API. To retain repetition history, pass
 the move list when setting a position. FEN alone supplies the current position
 and move counters. [FIDE Laws of Chess, Articles 9.2–9.6](https://handbook.fide.com/chapter/E012023)
 
-## Implementation
+## Repository layout
 
-| Module | Responsibility |
+| Path | Contents |
 | --- | --- |
-| `board_representation.py` | Bitboards, move generation, move application and undo |
-| `fen_handling.py` | FEN parsing, serialisation and board display |
-| `notation_handling.py` | Coordinate notation and square indexing |
-| `search_algorithms.py` | Game-tree search and transposition table |
-| `evaluation_functions.py` | Material and positional evaluation |
-| `timer.py` | Search timing |
-| `main.py` | Interactive entry point |
-| `uci.py` | Fixed-depth and clock-managed UCI entry point |
-| `benchmark.py` | Fixed perft and search corpus with JSON reporting |
-| `tune_evaluation.py` | Paired self-play for evaluation weight experiments |
+| [`chess_engine/`](chess_engine/) | Position state, move generation, FEN, evaluation, search, and interfaces |
+| [`tools/`](tools/) | Performance benchmarks and evaluation experiments |
+| `main.py`, `uci.py`, `benchmark.py`, `tune_evaluation.py` | Root launchers for the existing run commands |
+| `tests/` | Regression tests, perft, and python-chess comparisons |
+| `docs/` | Development instructions, engineering decisions, and square index reference |
 
-## Development roadmap
-
-See [the detailed roadmap](docs/ROADMAP.md) and [development progress](docs/PROGRESS.md). Run the regression suite with `python -m unittest discover -v`.
-
-- [x] Correct position state, make/undo and FEN round trips.
-- [x] Verify legal move generation, including checks, castling and en passant, with perft and python-chess.
-- [x] Verify negamax and alpha–beta against an independent reference search.
-- [x] Verify transposition-table keys and bound handling.
-- [x] Record a reproducible perft and search benchmark.
-- [x] Add fixed-depth and clock-managed UCI support for external chess interfaces.
-- [ ] Measure changes to move ordering and quiescence search against the baseline.
+See the [development guide](docs/DEVELOPMENT.md) for test and benchmark commands,
+the [roadmap](docs/ROADMAP.md) for priorities, and the [progress log](docs/PROGRESS.md)
+for measurements and verification.
 
 ## Technical focus
 

@@ -1,7 +1,7 @@
 import unittest
 
-from board_representation import ChessBoard
-from fen_handling import InvalidFEN
+from chess_engine.board_representation import ChessBoard
+from chess_engine.fen_handling import InvalidFEN
 
 START = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
 

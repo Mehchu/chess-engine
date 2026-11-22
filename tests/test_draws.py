@@ -2,8 +2,8 @@ import unittest
 
 import chess
 
-from board_representation import ChessBoard
-from search_algorithms import TranspositionTable, negamax, negamax_alpha_beta_top
+from chess_engine.board_representation import ChessBoard
+from chess_engine.search_algorithms import TranspositionTable, negamax, negamax_alpha_beta_top
 
 FEN = "4k1n1/8/8/8/3Q4/8/8/4K1N1 w - - 0 1"
 CYCLE = ("g1f3", "g8f6", "f3g1", "f6g8")

@@ -173,7 +173,7 @@ class UciTests(unittest.TestCase):
 
 class TimeBudgetTests(unittest.TestCase):
     def test_invalid_limits_are_rejected(self):
-        from uci import _parse_go, _time_budget_ms
+        from chess_engine.uci import _parse_go, _time_budget_ms
 
         for args in ([], ["wtime"], ["depth", "0"], ["movetime", "-1"],
                      ["movestogo", "0"], ["depth", "1", "depth", "2"]):
@@ -183,7 +183,7 @@ class TimeBudgetTests(unittest.TestCase):
             _time_budget_ms({"wtime": 1000}, False)
 
     def test_clock_allocation_and_cap(self):
-        from uci import _time_budget_ms
+        from chess_engine.uci import _time_budget_ms
 
         clocks = {"wtime": 9000, "btime": 1000, "winc": 400, "binc": 200}
         self.assertEqual(_time_budget_ms(clocks, True), 600)

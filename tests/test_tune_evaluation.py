@@ -2,8 +2,8 @@ import unittest
 
 import chess
 
-from board_representation import ChessBoard
-from tune_evaluation import BASELINE, CANDIDATES, _make_evaluator, _play
+from chess_engine.board_representation import ChessBoard
+from tools.tune_evaluation import BASELINE, CANDIDATES, _make_evaluator, _play
 
 
 class WeightScreenTests(unittest.TestCase):

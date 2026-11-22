@@ -2,8 +2,8 @@ import unittest
 
 import chess
 
-import fen_handling
-from notation_handling import decode_square
+from chess_engine import fen_handling
+from chess_engine.notation_handling import decode_square
 
 
 class FenTests(unittest.TestCase):

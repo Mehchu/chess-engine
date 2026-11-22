@@ -3,8 +3,8 @@ from unittest.mock import patch
 
 import chess
 
-from board_representation import ChessBoard
-from search_algorithms import (
+from chess_engine.board_representation import ChessBoard
+from chess_engine.search_algorithms import (
     SearchControl,
     SearchStopped,
     TranspositionTable,
@@ -64,7 +64,7 @@ class SearchTests(unittest.TestCase):
             for search in (negamax, negamax_alpha_beta_top):
                 with self.subTest(fen=fen, depth=depth, search=search.__name__):
                     board = ChessBoard(fen)
-                    with patch("search_algorithms.eval.evaluate", side_effect=material):
+                    with patch("chess_engine.search_algorithms.eval.evaluate", side_effect=material):
                         move, score = search(board, depth)
                     self.assertEqual(score, expected)
                     self.assertIn(move, best_moves or {None})
@@ -80,7 +80,7 @@ class SearchTests(unittest.TestCase):
         self.assertEqual(negamax(ChessBoard(mirrored), 0)[1], white_score)
 
     def test_evaluation_preserves_piece_square_scores(self):
-        from evaluation_functions import EvaluationFunction, table_array
+        from chess_engine.evaluation_functions import EvaluationFunction, table_array
 
         evaluator = EvaluationFunction()
         positions = (
@@ -99,7 +99,7 @@ class SearchTests(unittest.TestCase):
                 self.assertEqual(evaluator.evaluate_material(ChessBoard(fen)), expected)
 
     def test_king_centralisation_is_rewarded_in_sparse_endgames(self):
-        from evaluation_functions import EvaluationFunction
+        from chess_engine.evaluation_functions import EvaluationFunction
 
         evaluator = EvaluationFunction()
         sheltered = ChessBoard("4k3/8/8/8/8/8/P7/6K1 w - - 0 1")
@@ -108,8 +108,8 @@ class SearchTests(unittest.TestCase):
         self.assertGreater(evaluator.evaluate(active), evaluator.evaluate(sheltered))
 
     def test_full_material_still_uses_the_original_king_table(self):
-        from evaluation_functions import EvaluationFunction
-        from fen_handling import STARTING_FEN
+        from chess_engine.evaluation_functions import EvaluationFunction
+        from chess_engine.fen_handling import STARTING_FEN
 
         evaluator = EvaluationFunction()
         board = ChessBoard(STARTING_FEN)
@@ -121,7 +121,7 @@ class SearchTests(unittest.TestCase):
         board.make_move("d4d5")
         fen = board.to_fen()
         history = board.previous_positions.copy()
-        with patch("search_algorithms.eval.evaluate", side_effect=material):
+        with patch("chess_engine.search_algorithms.eval.evaluate", side_effect=material):
             _, exact = negamax(board, 2)
             _, lower_bound = negamax_alpha_beta_top(board, 2, -1000, -950)
             _, upper_bound = negamax_alpha_beta_top(board, 2, -850, -800)
@@ -137,7 +137,7 @@ class SearchTests(unittest.TestCase):
         for search in (negamax, negamax_alpha_beta_top):
             board = ChessBoard(fen)
             with (self.subTest(search=search.__name__),
-                  patch("search_algorithms.eval.evaluate", side_effect=RuntimeError),
+                  patch("chess_engine.search_algorithms.eval.evaluate", side_effect=RuntimeError),
                   self.assertRaises(RuntimeError)):
                 search(board, 2)
             self.assertEqual(board.to_fen(), fen)

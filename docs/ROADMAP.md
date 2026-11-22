@@ -4,7 +4,7 @@ The engine will own its position state, move rules, evaluation, and search. Keep
 
 ## 1. Position state and coordinates (implemented)
 
-**Findings.** `ChessBoard` rotates piece bitboards and swaps colour masks after every move. Rotation also treats castling flags and the en passant square index as spatial masks. The old FEN parser loses the active colour and clocks, and reverses en passant ranks. `notation_handling.py` and `referenceBoard.txt` already supply the fixed a1 = 0 coordinate convention.
+**Findings.** `ChessBoard` rotates piece bitboards and swaps colour masks after every move. Rotation also treats castling flags and the en passant square index as spatial masks. The old FEN parser loses the active colour and clocks, and reverses en passant ranks. `notation_handling.py` and the [square index reference](square-index-reference.txt) already supply the fixed a1 = 0 coordinate convention.
 
 Keep that convention throughout the engine and preserve the piece and colour masks. Use named fields for turn, castling, en passant, and both clocks. Derive occupancy from the colour masks or update it in one place. Wire the complete FEN codec into the live board when both colours can generate moves in fixed coordinates. Keep display as a read-only projection of the board.
 

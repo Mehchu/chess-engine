@@ -2,8 +2,8 @@ import unittest
 
 import chess
 
-from board_representation import ChessBoard
-from evaluation_functions import EvaluationFunction
+from chess_engine.board_representation import ChessBoard
+from chess_engine.evaluation_functions import EvaluationFunction
 
 
 class EvaluationTermsTests(unittest.TestCase):

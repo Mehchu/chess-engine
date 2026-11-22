@@ -1,8 +1,8 @@
 import unittest
 from unittest.mock import patch
 
-from board_representation import ChessBoard
-from search_algorithms import TranspositionTable, ZobristHash, negamax_alpha_beta_top
+from chess_engine.board_representation import ChessBoard
+from chess_engine.search_algorithms import TranspositionTable, ZobristHash, negamax_alpha_beta_top
 from tests.test_position import START
 
 

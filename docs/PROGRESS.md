@@ -130,3 +130,10 @@ games limit the comparison, so the current weights remain the reference.
 All 51 tests passed, including candidate-score and runner checks.
 
 Suggested commit `test: add paired self-play for evaluation weights`.
+
+### Repository layout
+
+- Moved the square index reference into `docs/`, added a development guide, and made README navigation reflect the repository layout. Updated Git ignore rules for local Python, coverage, and profiling artifacts.
+- All 51 tests passed. The benchmark returned 197,281 and 97,862 perft nodes for the starting position and Kiwipete. The interactive CLI, evaluation runner, and fixed-depth and timed UCI client checks completed locally.
+- The current checkout contains the UCI engine. Live Lichess verification requires the separate bot bridge and its configuration.
+- Grouped engine modules under `chess_engine/` and development programs under `tools/`. Updated project imports and kept the root launch commands as thin wrappers. Python callers now import engine modules through `chess_engine`.

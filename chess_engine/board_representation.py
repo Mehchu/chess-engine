@@ -1,8 +1,8 @@
 from enum import Enum
 from itertools import islice
 
-from fen_handling import CASTLING, FenPosition, display_chess_position, parse_fen
-from notation_handling import decompose_notation, encode_square
+from .fen_handling import CASTLING, FenPosition, display_chess_position, parse_fen
+from .notation_handling import decompose_notation, encode_square
 
 WHITE, BLACK = 6, 7
 ORTHOGONAL = ((-1, 0), (1, 0), (0, -1), (0, 1))

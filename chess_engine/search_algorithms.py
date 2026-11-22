@@ -4,8 +4,8 @@ from enum import Enum, auto
 from itertools import chain
 from random import Random
 
-from board_representation import Move, move_to_uci
-from evaluation_functions import EvaluationFunction
+from .board_representation import Move, move_to_uci
+from .evaluation_functions import EvaluationFunction
 
 MATE_SCORE = 100_000
 MATE_THRESHOLD = 90_000
