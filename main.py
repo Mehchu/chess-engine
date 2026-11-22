@@ -42,7 +42,7 @@ def _finished(board):
 
 def playGame(board: ChessBoard):
     timer = Timer()
-    depth = 4
+    depth = 2
     board.display_board()
 
     while not _finished(board):
@@ -64,9 +64,7 @@ def playGame(board: ChessBoard):
             return
 
         timer.start()
-        move, score = negamax_alpha_beta_top(
-            board, depth, -float("inf"), float("inf"), 1
-        )
+        move, score = negamax_alpha_beta_top(board, depth)
         timer.stop()
         print(f"The evaluation is {-score / 100}")
         board.make_move(move)

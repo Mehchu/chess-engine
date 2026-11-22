@@ -7,12 +7,12 @@ A Python chess-engine prototype exploring bitboard representations, game-tree se
 - 64-square integer bitboards for piece placement and occupancy.
 - Move generation for all six piece types, including promotion candidates.
 - FEN position parsing and terminal board visualisation.
-- Experimental minimax and negamax search, including alpha–beta pruning.
+- Uncached negamax search with optional alpha–beta pruning.
 - Material and piece-square-table evaluation.
 - Prototype position hashing and transposition-table caching.
 - Interactive command-line interface with search timing.
 
-**Status:** early-stage experimental engine. Legal moves and position restoration are covered by perft and python-chess comparisons. Draw adjudication beyond stalemate, search correctness, and UCI support remain in development.
+**Status:** early-stage experimental engine. Legal moves and position restoration are covered by perft and python-chess comparisons. Uncached search is checked against independent minimax. Draw adjudication beyond stalemate, transposition-table correctness, and UCI support remain in development.
 
 ## Getting started
 
@@ -31,7 +31,7 @@ For development, run `python -m pip install -r requirements-dev.txt` inside
 the same virtual environment. This also installs python-chess as a reference
 for tests.
 
-Press Enter to load the standard starting position, or enter a FEN string to experiment with piece placement. Enter moves in coordinate notation, such as `e2e4`, or `exit` to quit. The current prototype searches at a fixed depth of four plies and prints an evaluation and elapsed search time. Both sides use standard board coordinates. For a promotion, append the piece letter, as in `e7e8q`.
+Press Enter to load the standard starting position, or enter a FEN string to experiment with piece placement. Enter moves in coordinate notation, such as `e2e4`, or `exit` to quit. The current prototype searches at a fixed depth of two plies and prints an evaluation and elapsed search time. Both sides use standard board coordinates. For a promotion, append the piece letter, as in `e7e8q`.
 
 ## Implementation
 
@@ -51,7 +51,7 @@ See [the detailed roadmap](docs/ROADMAP.md) and [development progress](docs/PROG
 
 - [x] Correct position state, make/undo and FEN round trips.
 - [x] Verify legal move generation, including checks, castling and en passant, with perft and python-chess.
-- [ ] Verify negamax and alpha–beta against an independent reference search.
+- [x] Verify negamax and alpha–beta against an independent reference search.
 - [ ] Correct transposition table keys and bound handling.
 - [ ] Introduce iterative deepening, move ordering and quiescence search.
 - [ ] Benchmark search throughput and document measured improvements.

@@ -26,15 +26,15 @@ Reuse piece dispatch and sliding-ray traversal where appropriate. Add colour-awa
 
 **Acceptance.** Compare full UCI move sets and resulting positions with python-chess using curated fixtures and fixed-seed legal playouts. Cover pins, double check, castling through check, en passant exposing the king, and all promotions. Add perft and root divide with canonical counts, including the starting position at depths 1–4 (20, 400, 8,902, 197,281) and Kiwipete at depths 1–3 (48, 2,039, 97,862). Keep fast cases in the default suite and run deeper cases separately.
 
-## 4. Negamax and alpha–beta (next)
+## 4. Negamax and alpha–beta (verified)
 
-**Findings.** A terminal-state tuple is used as a Boolean in plain negamax. Minimax shadows the evaluator name. The prototype search entry points mix score conventions. The active path still uses the experimental cache, so it needs an uncached correctness baseline.
+**Implementation.** Plain negamax and alpha–beta now share the side-to-move score convention. The CLI uses uncached alpha–beta. Tests compare both algorithms with independent minimax and cover cutoff bounds and restoration after an exception.
 
 Keep the existing material and piece-square baseline, verify table orientation, and define a single score convention at the search boundary. Implement plain negamax as a correctness reference. Test alpha–beta with caching disabled. Evaluate checkmate and stalemate at the horizon, score mate with ply distance, and restore the board in a finally block after every recursive move. Route CLI play through the verified entry point. Leave the unfinished Monte Carlo prototype outside the active path.
 
 **Acceptance.** Compare both searches with a small independent minimax on forced mates, stalemates, and material positions for either side. Compare scores and membership in the set of equally best legal moves. Verify position and history restoration after normal searches and cutoffs.
 
-## 5. Zobrist keys and transposition table
+## 5. Zobrist keys and transposition table (next)
 
 **Findings.** The prototype XORs products of whole bitboards and random values. It omits explicit side to move and stores all scores as exact, including cutoff bounds.
 
@@ -56,6 +56,7 @@ Record a fixed perft and search corpus with depths, nodes, elapsed time, and nod
 - `fix: round-trip complete FEN position state`
 - `fix: keep board coordinates stable across make and undo`
 - `feat: verify legal move generation with perft and python-chess`
+- `fix: use filled glyphs for white pieces in the CLI`
 - `fix: verify negamax and alpha-beta against reference search`
 - `fix: store depth-qualified transposition bounds`
 - `feat: add reproducible benchmarks and UCI support`

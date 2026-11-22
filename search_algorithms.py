@@ -29,213 +29,84 @@ class ZobristHash:  # Hashing algorithm to uniquely hash a ChessBoard objects's 
         return np.bitwise_xor.reduce(position * self.keys)
 
 
-# Initialises an object of each class for future use
-transposition_table = TranspositionTable()
+MATE_SCORE = 100_000
 eval = EvaluationFunction()
-hash = ZobristHash()
 
 
-def minimax(board, depth, maximizing_player):
-    if depth == 0 or board.is_game_over():
-        return None, eval.evaluate(board)
-
-    if maximizing_player:
-        best_move = None
-        max_eval = -float("inf")
-
-        for move in board.generate_legal_moves():
-            board.make_move(move)
-
-            _, eval = minimax(board, depth - 1, False)
-            eval = -eval
-
-            board.undo_move()
-
-            if eval > max_eval:
-                max_eval = eval
-                best_move = move
-
-        return best_move, max_eval
+def _moves_or_score(board, depth, ply):
+    if depth == 0:
+        ended, _ = board.is_game_over()
+        if not ended:
+            return (), eval.evaluate(board)
+        moves = ()
     else:
-        best_move = None
-        min_eval = float("inf")
+        moves = board.generate_legal_moves()
+        if moves:
+            return moves, None
 
-        for move in board.generate_legal_moves():
-            board.make_move(move)
-
-            _, eval = minimax(board, depth - 1, True)
-            eval = -eval
-
-            board.undo_move()
-
-            if eval < min_eval:
-                min_eval = eval
-                best_move = move
-
-        return best_move, min_eval
+    return moves, -MATE_SCORE + ply if board.is_check() else 0
 
 
-def minimax_alpha_beta(board, depth, alpha, beta, maximizing_player):
-    if depth == 0 or board.is_game_over():
-        return None, eval.evaluate(board)
-
-    if maximizing_player:
-        best_move = None
-        max_eval = -float("inf")
-
-        for move in board.generate_legal_moves():
-            board.make_move(move)
-
-            _, eval = minimax_alpha_beta(board, depth - 1, alpha, beta, False)
-            eval = -eval
-
-            board.undo_move()
-
-            if eval > max_eval:
-                max_eval = eval
-                best_move = move
-
-            alpha = max(alpha, eval)
-            if beta <= alpha:
-                break
-
-        return best_move, max_eval
-    else:
-        best_move = None
-        min_eval = float("inf")
-
-        for move in board.generate_legal_moves():
-            board.make_move(move)
-
-            _, eval = minimax_alpha_beta(board, depth - 1, alpha, beta, True)
-            eval = -eval
-
-            board.undo_move()
-
-            if eval < min_eval:
-                min_eval = eval
-                best_move = move
-
-            beta = min(beta, eval)
-            if beta <= alpha:
-                break
-
-        return best_move, min_eval
+def negamax(board, depth):
+    """Return a best move and exact score from the root side's perspective."""
+    if depth < 0:
+        raise ValueError("Search depth must be non-negative")
+    return _negamax(board, depth, 0)
 
 
-def negamax(board, depth, color):
-    if depth == 0 or board.is_game_over():
-        return None, color * eval.evaluate(board)
-
-    best_move = None
-    max_score = -float("inf")
-
-    for move in board.generate_legal_moves():
-        board.make_move(move)
-
-        _, score = negamax(board, depth - 1, -color)
-        score = -score
-        board.undo_move()
-
-        if score > max_score:
-            max_score = score
-            best_move = move
-
-    return best_move, max_score
-
-
-def negamax_alpha_beta_top(
-    board, depth, alpha, beta, color
-):  # Negamax split into two functions to save memory by not storing the best move at every recursion call, but only at the top level
-    key = (hash.generate_key(board.all_bitboards), board.white_to_move)
-    ended, score = board.is_game_over()
-    if ended:
+def _negamax(board, depth, ply):
+    moves, score = _moves_or_score(board, depth, ply)
+    if score is not None:
         return None, score
 
-    if depth == 0:  # If the final depth has been reached
-        return None, color * eval.evaluate(
-            board
-        )  # No static best move function so just returns evaluation
+    best_move, best_score = None, -float("inf")
+    for move in moves:
+        board.make_move(move)
+        try:
+            _, child_score = _negamax(board, depth - 1, ply + 1)
+        finally:
+            board.undo_move()
 
-    # Initialise variables to starting values
-    best_move = None
-    best_score = -float("inf")
-
-    # Loop through all the legal moves in the current position
-    for move in board.legal_moves:
-        board.make_move(move)  # Make the current iterated move
-        score = -negamax_alpha_beta(
-            board, depth - 1, -beta, -alpha, color
-        )  # Call the function from the other colour's perspective, with negative values to represent this
-        board.undo_move()  # Undo the move, to prepare the board for the next move in the loop to be made
-
-        if (
-            score > best_score
-        ):  # If it has found a move which produces a better evaluation
-            best_score = score  # Replace the best score with this newly found score
-            best_move = move  #  Replace the best move with this newly found move
-
-        # Alpha-beta pruning
-        alpha = max(
-            alpha, score
-        )  # Makes alpha the biggest value out of alpha and score
-
-        if alpha >= beta:  # If the beta cut-off is reached
-            break  # Stop searching this branch
-
-    transposition_table.store(
-        key, best_score, depth
-    )  # Store the evaluated position in the transposition table
-    return (
-        best_move,
-        best_score,
-    )  # Return the best move to be played and the associated evaluation of the position
+        score = -child_score
+        if score > best_score:
+            best_move, best_score = move, score
+    return best_move, best_score
 
 
-def negamax_alpha_beta(
-    board, depth, alpha, beta, color
-):  # For recursion calls of negamax
-    key = (hash.generate_key(board.all_bitboards), board.white_to_move)
-    if (
-        key in transposition_table.table
-        and transposition_table.table[key]["depth"]
-        >= depth  # Checks if the current position has already been searched at an equal or greater depth
-    ):
-        return transposition_table.table[key][
-            "score"
-        ]  # Return the previously computed evaluation for the position
-        
-    ended, score = board.is_game_over()
-    if ended:
-        return score
+def negamax_alpha_beta_top(board, depth, alpha=-float("inf"), beta=float("inf")):
+    """Return a move and side-to-move score, or a bound outside the window."""
+    if depth < 0:
+        raise ValueError("Search depth must be non-negative")
+    if not alpha < beta:
+        raise ValueError("Alpha must be less than beta")
+    return _alpha_beta(board, depth, alpha, beta, 0)
 
-    if depth == 0:  # If no more searching for this branch is needed
-        return color * eval.evaluate(board)
-    
-    
 
-    best_score = -float("inf")  # Initialise the starting score for this search branch
+def negamax_alpha_beta(board, depth, alpha=-float("inf"), beta=float("inf")):
+    """Return just the root score or bound."""
+    return negamax_alpha_beta_top(board, depth, alpha, beta)[1]
 
-    # Search through each legal move in the position
-    for move in board.legal_moves:
-        board.make_move(move)  # Make the move to be searched through
-        score = -negamax_alpha_beta(
-            board, depth - 1, -beta, -alpha, color
-        )  # Call the function with a decremented depth and from the other colour's perspective
-        board.undo_move()  # Undo the move
 
-        best_score = max(best_score, score)  # Update the max score
+def _alpha_beta(board, depth, alpha, beta, ply):
+    moves, score = _moves_or_score(board, depth, ply)
+    if score is not None:
+        return None, score
 
-        # Alpha-beta pruning
-        alpha = max(alpha, score)  # Update the alpha value
+    best_move, best_score = None, -float("inf")
+    for move in moves:
+        board.make_move(move)
+        try:
+            _, child_score = _alpha_beta(board, depth - 1, -beta, -alpha, ply + 1)
+        finally:
+            board.undo_move()
 
-        if alpha >= beta:  # Trigger the beta cut-off
-            break  # Stop searching
-
-    transposition_table.store(
-        key, best_score, depth
-    )  # Store the searched position in the transposition table with relevant data
-    return best_score  # Return the best score for this branch of the position
+        score = -child_score
+        if score > best_score:
+            best_move, best_score = move, score
+        alpha = max(alpha, score)
+        if alpha >= beta:
+            break
+    return best_move, best_score
 
 
 class Node:

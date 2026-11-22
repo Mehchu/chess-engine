@@ -16,3 +16,11 @@
 - Compared complete move sets, occupancy, checked status, and full FEN against python-chess on tactical fixtures and three fixed-seed playouts, including complete undo. Root divide matches python-chess for Kiwipete at depth two. Perft matches the starting position through depth four and Kiwipete through depth three.
 - Updated the CLI and existing evaluator for fixed coordinates. Removed two inactive evaluation helpers that depended on rotating the board. Kept the prototype search interface and included turn in its cache lookup. The search and table still need independent correctness tests, starting with uncached negamax and alpha–beta.
 - Suggested commits: `fix: keep position state consistent across make and undo` and `test: verify legal move generation against perft and python-chess`. Keep the board and its search compatibility changes together when staging.
+
+### Terminal glyphs and uncached search
+
+- Swapped the terminal glyphs so White uses filled symbols and Black uses outlines. Added display assertions for both back ranks and pawns after a move.
+- Replaced the duplicate prototype minimax paths with plain negamax and fail-soft alpha–beta. Both score from the side to move, handle checkmate and stalemate at depth zero, and prefer earlier mates using distance from the root. Every recursive move unwinds in a finally block.
+- Removed the colour parameter from the search API because the evaluator already returns a side-to-move score. The CLI uses uncached alpha–beta at the existing two-ply setting. The experimental hash and table classes remain available for the next milestone.
+- Checked both searches against a small White-relative minimax using python-chess for test positions and moves. Covered both colours, horizon terminal states, optimal-move sets, fail-high and fail-low bounds, evaluator orientation, and restoration after cutoffs and evaluation exceptions.
+- Next milestone is deterministic Zobrist keys and a depth-qualified transposition table, with uncached alpha–beta as the comparison baseline.

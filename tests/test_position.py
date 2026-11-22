@@ -39,9 +39,10 @@ class PositionTests(unittest.TestCase):
         board = ChessBoard(START)
         board.make_move("e2e4")
         rows = str(board).splitlines()
-        self.assertEqual(rows[0].split()[4], "♚")
-        self.assertEqual(rows[4].split()[4], "♙")
-        self.assertEqual(rows[7].split()[4], "♔")
+        self.assertEqual(rows[0].split(), list("♖♘♗♕♔♗♘♖"))
+        self.assertEqual(rows[1].split(), ["♙"] * 8)
+        self.assertEqual(rows[4].split()[4], "♟")
+        self.assertEqual(rows[7].split(), list("♜♞♝♛♚♝♞♜"))
 
     def test_malformed_fen(self):
         for fen in (
