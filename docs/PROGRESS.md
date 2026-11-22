@@ -54,3 +54,10 @@
 - Transposition reuse now includes the known reversible history. A regression searches identical FENs with different histories using the same table and gets the correct result for each.
 - All 36 tests passed. Two benchmark runs reproduced perft counts, search node counts, best moves, and scores. The counts and scores matched the prior baseline.
 - Suggested commit `fix: adjudicate repetition and move-count draws`.
+
+### Clock-managed UCI
+
+- Added fixed move time and side-specific UCI clocks, increments, and moves-to-go. The initial allocation spreads the clock over the reported moves-to-go or 30 by default, uses three quarters of the increment, and reserves up to 50 milliseconds of remaining time. An explicit move time overrides the clock estimate.
+- The worker uses a monotonic deadline and the existing search cancellation callback. At the deadline it returns the most recent completed depth, with a legal fallback for zero or very short budgets.
+- All 41 tests passed. Subprocess tests cover zero and short budgets, active-side clock selection, combined limits, readiness during search, and manual stop. The asynchronous python-chess UCI client returned legal moves with both time-control forms.
+- Next step is to bound transposition-table memory. Suggested commit `feat: support clock-managed UCI search`.

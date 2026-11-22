@@ -10,9 +10,9 @@ A Python chess-engine prototype exploring bitboard representations, game-tree se
 - Negamax and alpha–beta search with an optional transposition table.
 - Material and piece-square-table evaluation.
 - Deterministic Zobrist position hashing and depth-qualified cache bounds.
-- Interactive command-line interface, depth-limited UCI mode, and reproducible benchmarks.
+- Interactive command-line interface, fixed-depth and clock-managed UCI mode, and reproducible benchmarks.
 
-**Status:** early-stage experimental engine. Legal moves and position restoration are covered by perft and python-chess comparisons. Uncached search is checked against independent minimax. Cached search is checked against the uncached baseline. Search adjudicates stalemate, fivefold repetition, and the 75-move rule. Dead positions and UCI clock controls remain in development.
+**Status:** early-stage experimental engine. Legal moves and position restoration are covered by perft and python-chess comparisons. Uncached search is checked against independent minimax. Cached search is checked against the uncached baseline. Search adjudicates stalemate, fivefold repetition, and the 75-move rule. Dead-position detection and draw-claim submission remain in development.
 
 ## Getting started
 
@@ -37,10 +37,13 @@ Press Enter to load the standard starting position, or enter a FEN string to exp
 
 Run `python -m uci` from the repository root. The engine accepts
 `uci`, `isready`, `ucinewgame`, `position startpos`, `position fen`,
-`go depth N`, `stop`, and `quit`. Both position forms accept a suffix
-such as `moves e2e4 e7e5`. Use a client configured for fixed-depth analysis.
-Timed play, pondering, and engine options are outside the supported command set.
-[UCI protocol reference](https://github.com/official-stockfish/Stockfish/wiki/UCI-Protocol-%26-Commands)
+`go`, `stop`, and `quit`. Both position forms accept a suffix such as
+`moves e2e4 e7e5`. Use `go depth N` for fixed-depth analysis,
+`go movetime N` for a per-move budget in milliseconds, or
+`go wtime 60000 btime 60000 winc 1000 binc 1000` for clock-managed play.
+Clock-managed searches also accept `movestogo`. A depth limit can be combined
+with a time limit. Pondering and engine options remain unsupported.
+[UCI protocol reference](https://www.wbec-ridderkerk.nl/html/UCIProtocol.html)
 
 Run `python -m benchmark --repeat 2` to emit a JSON report for the starting
 position and Kiwipete. It records the Git revision and dirty status, Python
@@ -65,7 +68,7 @@ and move counters. [FIDE Laws of Chess, Articles 9.2–9.6](https://handbook.fid
 | `evaluation_functions.py` | Material and positional evaluation |
 | `timer.py` | Search timing |
 | `main.py` | Interactive entry point |
-| `uci.py` | Depth-limited UCI entry point |
+| `uci.py` | Fixed-depth and clock-managed UCI entry point |
 | `benchmark.py` | Fixed perft and search corpus with JSON reporting |
 
 ## Development roadmap
@@ -77,7 +80,7 @@ See [the detailed roadmap](docs/ROADMAP.md) and [development progress](docs/PROG
 - [x] Verify negamax and alpha–beta against an independent reference search.
 - [x] Verify transposition-table keys and bound handling.
 - [x] Record a reproducible perft and search benchmark.
-- [x] Add depth-limited UCI support for external chess interfaces.
+- [x] Add fixed-depth and clock-managed UCI support for external chess interfaces.
 - [ ] Measure changes to move ordering and quiescence search against the baseline.
 
 ## Technical focus

@@ -48,7 +48,7 @@ Keep the existing material and piece-square baseline, verify table orientation, 
 
 **Verification.** Two benchmark runs reproduced node counts, scores, and moves. Subprocess tests cover handshake, positions and move lists, fixed-depth search, cancellation, terminal `0000`, and shutdown.
 
-**Follow-up.** Extend UCI for clock-managed play. Dead-position adjudication and claim submission through the user interfaces remain open. Measure any move ordering or quiescence changes against the fixed benchmark and keep the current correctness checks.
+**Follow-up.** Dead-position adjudication and claim submission through the user interfaces remain open. Measure any move ordering or quiescence changes against the fixed benchmark and keep the current correctness checks.
 
 ## 7. Repetition and move-count draws (verified)
 
@@ -58,6 +58,17 @@ end search automatically. Checkmate takes precedence on the move-count
 threshold. The same FEN can have different draw outcomes depending on prior
 moves, so the transposition table qualifies reuse with the known reversible
 history. [FIDE Laws of Chess, Articles 9.2–9.6](https://handbook.fide.com/chapter/E012023)
+
+## 8. Clock-managed UCI (verified)
+
+`go movetime` sets a per-move limit. For clock-managed play, the engine uses
+the active side's remaining time and increment, divides the clock by
+`movestogo` or 30 as a default, and keeps a small reserve. A depth limit
+can be combined with either time control. The worker checks a monotonic
+deadline at each search node and retains the last completed result.
+
+The next step is a bounded transposition table so longer searches have a
+predictable memory footprint.
 
 ## Suggested commit boundaries
 
@@ -71,3 +82,4 @@ history. [FIDE Laws of Chess, Articles 9.2–9.6](https://handbook.fide.com/chap
 - `feat: add reproducible perft and search benchmarks`
 - `feat: add a depth-limited UCI entry point`
 - `fix: adjudicate repetition and move-count draws`
+- `feat: support clock-managed UCI search`

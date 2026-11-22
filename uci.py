@@ -1,7 +1,9 @@
-"""Depth-limited Universal Chess Interface entry point."""
+"""Universal Chess Interface entry point for depth and clock limits."""
 
 import sys
+from itertools import count
 from threading import Event, Lock, Thread
+from time import monotonic_ns
 
 from board_representation import ChessBoard
 from fen_handling import InvalidFEN, STARTING_FEN
@@ -33,6 +35,41 @@ def _parse_position(tokens):
     return board
 
 
+def _parse_go(tokens):
+    supported = {"depth", "movetime", "wtime", "btime", "winc", "binc", "movestogo"}
+    if len(tokens) % 2:
+        raise ValueError("Search limits require a name and an integer")
+    limits = {}
+    for name, value in zip(tokens[::2], tokens[1::2]):
+        if name not in supported or name in limits:
+            raise ValueError(f"Unsupported or repeated search limit: {name}")
+        minimum = 1 if name in ("depth", "movestogo") else 0
+        limit = int(value)
+        if limit < minimum:
+            raise ValueError(f"{name} must be at least {minimum}")
+        limits[name] = limit
+    if not limits.keys() & {"depth", "movetime", "wtime", "btime"}:
+        raise ValueError("Expected a depth, move time, or clock limit")
+    return limits
+
+
+def _time_budget_ms(limits, white_to_move):
+    if "movetime" in limits:
+        return limits["movetime"]
+    if "wtime" not in limits and "btime" not in limits:
+        return None
+
+    colour = "w" if white_to_move else "b"
+    clock = f"{colour}time"
+    if clock not in limits:
+        raise ValueError(f"Missing {clock} for the side to move")
+    remaining = limits[clock]
+    increment = limits.get(f"{colour}inc", 0)
+    moves = limits.get("movestogo", 30)
+    reserve = min(50, remaining // 10)
+    return min(remaining - reserve, remaining // moves + 3 * increment // 4)
+
+
 def _score_text(score):
     if abs(score) < MATE_THRESHOLD:
         return f"cp {round(score)}"
@@ -53,16 +90,20 @@ class UciEngine:
         with self._output_lock:
             print(message, file=self._output, flush=True)
 
-    def _search(self, board, max_depth):
+    def _search(self, board, max_depth, deadline):
         moves = board.generate_legal_moves()
         if not moves or board.automatic_draw_reason() is not None:
             self._send("bestmove 0000")
             return
         best_move = moves[0]
-        control = SearchControl(should_stop=self._stop.is_set)
+        def should_stop():
+            return self._stop.is_set() or (deadline is not None and monotonic_ns() >= deadline)
+
+        control = SearchControl(should_stop=should_stop)
         table = TranspositionTable()
+        depths = count(1) if max_depth is None else range(1, max_depth + 1)
         try:
-            for depth in range(1, max_depth + 1):
+            for depth in depths:
                 best_move, score = negamax_alpha_beta_top(
                     board, depth, table=table, control=control
                 )
@@ -78,14 +119,14 @@ class UciEngine:
             self._worker = None
 
     def _go(self, tokens):
-        if len(tokens) != 2 or tokens[0] != "depth":
-            raise ValueError("Supported search command is go depth <positive integer>")
-        depth = int(tokens[1])
-        if depth < 1:
-            raise ValueError("Search depth must be positive")
+        limits = _parse_go(tokens)
         self._stop_search()
+        # The worker makes temporary moves on the board while it searches.
+        # Read the root side only after joining the previous worker.
+        budget = _time_budget_ms(limits, self.board.white_to_move)
+        deadline = None if budget is None else monotonic_ns() + budget * 1_000_000
         self._stop.clear()
-        self._worker = Thread(target=self._search, args=(self.board, depth))
+        self._worker = Thread(target=self._search, args=(self.board, limits.get("depth"), deadline))
         self._worker.start()
 
     def run(self, commands):
