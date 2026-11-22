@@ -32,3 +32,17 @@
 - The CLI creates a fresh table for each engine reply. Calling alpha–beta without a table still provides the uncached baseline.
 - Regression tests verify cold and warm reuse, exact-depth isolation, halfmove isolation, fail-high and fail-low handling, and a cached mate score reused at a different ply. Repetition adjudication still needs a history-aware reuse policy.
 - Next milestone is reproducible benchmarks and UCI support. Suggested commit `fix: add deterministic Zobrist keys and depth-qualified transposition bounds`.
+
+### Benchmarks and UCI
+
+- Added `python -m benchmark --repeat 2` for a fixed perft and search corpus with timings, node counts, rates, cache settings, and environment metadata.
+- Recorded the following baseline over two runs on CPython 3.14.8 and Linux x86-64 from a working tree based on `e955496`. Both runs returned the same counts, scores, and moves.
+
+| Position | Perft depth and nodes | Uncached search nodes at depth 3 | Fresh-table search nodes at depth 3 |
+| --- | --- | ---: | ---: |
+| Starting position | 4, 197,281 | 1,448 | 1,448 |
+| Kiwipete | 3, 97,862 | 10,106 | 10,082 |
+
+- Added a separate depth-limited UCI entry point. The worker searches successive depths and returns the last completed answer on `stop`, with a legal fallback if stopped before depth one. It shares the existing alpha–beta implementation and restores the board when cancellation unwinds.
+- Verified subprocess transcripts and a handshake and depth-two search with the asynchronous python-chess UCI client. Clock-managed play, pondering, and draw adjudication beyond stalemate remain open.
+- The synchronous python-chess smoke test timed out before it sent a search command. A standalone cross-thread asyncio wakeup also timed out in this environment. Direct subprocess transcripts and the asynchronous UCI client completed successfully.

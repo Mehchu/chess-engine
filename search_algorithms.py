@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum, auto
 from random import Random
@@ -7,6 +8,23 @@ from evaluation_functions import EvaluationFunction
 MATE_SCORE = 100_000
 MATE_THRESHOLD = 90_000
 eval = EvaluationFunction()
+
+
+class SearchStopped(Exception):
+    """A caller requested that the search unwind."""
+
+
+@dataclass
+class SearchControl:
+    """Count alpha–beta node visits and optionally check for cancellation."""
+
+    should_stop: Callable[[], bool] | None = None
+    nodes: int = 0
+
+    def visit(self):
+        if self.should_stop is not None and self.should_stop():
+            raise SearchStopped()
+        self.nodes += 1
 
 
 class ZobristHash:
@@ -119,13 +137,15 @@ def _negamax(board, depth, ply):
     return best_move, best_score
 
 
-def negamax_alpha_beta_top(board, depth, alpha=-float("inf"), beta=float("inf"), *, table=None):
+def negamax_alpha_beta_top(
+    board, depth, alpha=-float("inf"), beta=float("inf"), *, table=None, control=None
+):
     """Return a move and side-to-move score, or a bound outside the window."""
     if depth < 0:
         raise ValueError("Search depth must be non-negative")
     if not alpha < beta:
         raise ValueError("Alpha must be less than beta")
-    return _alpha_beta(board, depth, alpha, beta, 0, table)
+    return _alpha_beta(board, depth, alpha, beta, 0, table, control)
 
 
 def negamax_alpha_beta(board, depth, alpha=-float("inf"), beta=float("inf"), *, table=None):
@@ -133,9 +153,11 @@ def negamax_alpha_beta(board, depth, alpha=-float("inf"), beta=float("inf"), *, 
     return negamax_alpha_beta_top(board, depth, alpha, beta, table=table)[1]
 
 
-def _alpha_beta(board, depth, alpha, beta, ply, table):
+def _alpha_beta(board, depth, alpha, beta, ply, table, control):
+    if control is not None:
+        control.visit()
     if table is None:
-        return _search_node(board, depth, alpha, beta, ply, table)
+        return _search_node(board, depth, alpha, beta, ply, table, control)
 
     key = table.key_for(board)
     entry = table.lookup(key, depth)
@@ -146,7 +168,7 @@ def _alpha_beta(board, depth, alpha, beta, ply, table):
                 or (entry.bound is Bound.UPPER and score <= alpha)):
             return entry.move, score
 
-    move, score = _search_node(board, depth, alpha, beta, ply, table)
+    move, score = _search_node(board, depth, alpha, beta, ply, table, control)
     if score <= alpha:
         bound = Bound.UPPER
     elif score >= beta:
@@ -157,7 +179,7 @@ def _alpha_beta(board, depth, alpha, beta, ply, table):
     return move, score
 
 
-def _search_node(board, depth, alpha, beta, ply, table):
+def _search_node(board, depth, alpha, beta, ply, table, control):
     moves, score = _moves_or_score(board, depth, ply)
     if score is not None:
         return None, score
@@ -166,7 +188,9 @@ def _search_node(board, depth, alpha, beta, ply, table):
     for move in moves:
         board.make_move(move)
         try:
-            _, child_score = _alpha_beta(board, depth - 1, -beta, -alpha, ply + 1, table)
+            _, child_score = _alpha_beta(
+                board, depth - 1, -beta, -alpha, ply + 1, table, control
+            )
         finally:
             board.undo_move()
 

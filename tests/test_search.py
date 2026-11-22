@@ -4,7 +4,13 @@ from unittest.mock import patch
 import chess
 
 from board_representation import ChessBoard
-from search_algorithms import negamax, negamax_alpha_beta_top
+from search_algorithms import (
+    SearchControl,
+    SearchStopped,
+    TranspositionTable,
+    negamax,
+    negamax_alpha_beta_top,
+)
 
 MATE = 100_000
 VALUES = {chess.PAWN: 100, chess.KNIGHT: 300, chess.BISHOP: 320,
@@ -99,3 +105,19 @@ class SearchTests(unittest.TestCase):
                 search(board, 2)
             self.assertEqual(board.to_fen(), fen)
             self.assertFalse(board.previous_positions)
+
+    def test_interruption_restores_board_and_table_can_be_reused(self):
+        board = ChessBoard("4k3/8/8/8/3Q4/8/8/4K3 w - - 0 1")
+        board.make_move("d4d5")
+        fen = board.to_fen()
+        history = board.previous_positions.copy()
+        table = TranspositionTable()
+        control = SearchControl(should_stop=lambda: control.nodes >= 5)
+        with self.assertRaises(SearchStopped):
+            negamax_alpha_beta_top(board, 3, table=table, control=control)
+        self.assertEqual(control.nodes, 5)
+        self.assertEqual(board.to_fen(), fen)
+        self.assertEqual(board.previous_positions, history)
+        self.assertIsNone(table.lookup(table.key_for(board), 3))
+        self.assertEqual(negamax_alpha_beta_top(board, 3, table=table),
+                         negamax_alpha_beta_top(board, 3))

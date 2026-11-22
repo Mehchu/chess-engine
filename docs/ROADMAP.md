@@ -28,7 +28,7 @@ Reuse piece dispatch and sliding-ray traversal where appropriate. Add colour-awa
 
 ## 4. Negamax and alpha–beta (verified)
 
-**Implementation.** Plain negamax and alpha–beta now share the side-to-move score convention. The CLI uses uncached alpha–beta. Tests compare both algorithms with independent minimax and cover cutoff bounds and restoration after an exception.
+**Implementation.** Plain negamax and alpha–beta now share the side-to-move score convention. Uncached alpha–beta remains the reference for cached search. Tests compare both algorithms with independent minimax and cover cutoff bounds and restoration after an exception.
 
 Keep the existing material and piece-square baseline, verify table orientation, and define a single score convention at the search boundary. Implement plain negamax as a correctness reference. Test alpha–beta with caching disabled. Evaluate checkmate and stalemate at the horizon, score mate with ply distance, and restore the board in a finally block after every recursive move. Route CLI play through the verified entry point. Leave the unfinished Monte Carlo prototype outside the active path.
 
@@ -42,13 +42,13 @@ Keep the existing material and piece-square baseline, verify table orientation, 
 
 **Acceptance.** Changing each relevant field changes the key on targeted fixtures. Undo restores the key. With the table enabled, full-window scores agree with uncached search. Narrow-window tests cover both bound directions, and shallow entries cannot cut off deeper searches. If incremental hashing is added later, compare it with recomputation after every move and undo.
 
-## 6. Benchmarks and UCI (next)
+## 6. Benchmarks and UCI (verified)
 
-**Findings.** The interactive CLI searches at a fixed depth and `Timer` prints elapsed time. There is no reproducible benchmark or UCI command loop.
+**Implementation.** The fixed benchmark corpus reports perft, cached and uncached search, timings, and environment metadata as JSON. A separate UCI entry point serves fixed-depth searches. It reports completed depths and uses cooperative cancellation so it can acknowledge `isready` during search and return the latest completed result on `stop`.
 
-Record a fixed perft and search corpus with depths, nodes, elapsed time, and nodes per second. Include interpreter version, hardware, commit, and table settings. Use the existing monotonic timer approach. Implement UCI with scripted subprocess tests for `uci`, `isready`, `ucinewgame`, `position`, `go depth`, `stop`, and `quit`. Keep diagnostic output off protocol stdout.
+**Verification.** Two benchmark runs reproduced node counts, scores, and moves. Subprocess tests cover handshake, positions and move lists, fixed-depth search, cancellation, terminal `0000`, and shutdown.
 
-**Acceptance.** Benchmark runs reproduce node counts and report timings. Protocol transcripts produce legal best moves or `0000` at terminal positions and handle both starting positions and explicit FENs. Evaluate optimisations such as iterative deepening, move ordering, and quiescence only after the move generation and search gates pass.
+**Follow-up.** Extend UCI for clock-managed play and add draw adjudication before claiming full game support. Measure any move ordering or quiescence changes against the fixed benchmark and keep the current correctness checks.
 
 ## Suggested commit boundaries
 
@@ -59,4 +59,5 @@ Record a fixed perft and search corpus with depths, nodes, elapsed time, and nod
 - `fix: use filled glyphs for white pieces in the CLI`
 - `fix: verify negamax and alpha-beta against reference search`
 - `fix: store depth-qualified transposition bounds`
-- `feat: add reproducible benchmarks and UCI support`
+- `feat: add reproducible perft and search benchmarks`
+- `feat: add a depth-limited UCI entry point`

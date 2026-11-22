@@ -1,10 +1,9 @@
 from board_representation import ChessBoard
-from fen_handling import InvalidFEN
+from fen_handling import InvalidFEN, STARTING_FEN
 from notation_handling import InvalidNotation
 from search_algorithms import TranspositionTable, negamax_alpha_beta_top
 from timer import Timer
 
-STARTING_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"  # Default starting chess position
 TEST_FEN = "k5q1/8/8/8/8/8/8/K4Q2 w - - 0 1"
 
 
@@ -42,7 +41,7 @@ def _finished(board):
 
 def playGame(board: ChessBoard):
     timer = Timer()
-    depth = 2
+    depth = 4
     board.display_board()
 
     while not _finished(board):

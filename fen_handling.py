@@ -4,6 +4,7 @@ import numpy as np
 
 from notation_handling import decode_square, encode_square
 
+STARTING_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
 PIECES = "pnbrqk"
 CASTLING = {"K": 8, "Q": 4, "k": 2, "q": 1}
 
