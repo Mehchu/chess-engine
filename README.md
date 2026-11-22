@@ -12,7 +12,7 @@ A Python chess-engine prototype exploring bitboard representations, game-tree se
 - Deterministic Zobrist position hashing and depth-qualified cache bounds.
 - Interactive command-line interface, depth-limited UCI mode, and reproducible benchmarks.
 
-**Status:** early-stage experimental engine. Legal moves and position restoration are covered by perft and python-chess comparisons. Uncached search is checked against independent minimax. Cached search is checked against the uncached baseline. Draw adjudication beyond stalemate and UCI clock controls remain in development.
+**Status:** early-stage experimental engine. Legal moves and position restoration are covered by perft and python-chess comparisons. Uncached search is checked against independent minimax. Cached search is checked against the uncached baseline. Search adjudicates stalemate, fivefold repetition, and the 75-move rule. Dead positions and UCI clock controls remain in development.
 
 ## Getting started
 
@@ -47,6 +47,12 @@ position and Kiwipete. It records the Git revision and dirty status, Python
 and hardware details, perft counts, and depth-three search with the table
 disabled and freshly initialised. Perft counts leaf positions. Search
 counts every visited node, including transposition-table hits.
+
+The board API detects threefold and 50-move claims, including an intended move.
+Search automatically ends only on the supported automatic rules. Claims are
+available to callers through the board API. To retain repetition history, pass
+the move list when setting a position. FEN alone supplies the current position
+and move counters. [FIDE Laws of Chess, Articles 9.2–9.6](https://handbook.fide.com/chapter/E012023)
 
 ## Implementation
 

@@ -38,7 +38,7 @@ Keep the existing material and piece-square baseline, verify table orientation, 
 
 **Implementation.** Recompute a seeded 64-bit key from colour, piece, square, turn, castling, and the raw FEN en passant target. Key table entries by that hash, halfmove clock, and exact remaining depth. Use exact, lower, and upper bounds classified against the original window. Normalise mate scores relative to the cached position.
 
-**Draw policy.** This cache applies to the current search rules, which end on checkmate or stalemate. A future repetition key should include the en passant target only when a legal en passant capture is available. Before adding repetition adjudication, include the relevant history in table reuse decisions or bypass score reuse where history can affect the result.
+**Draw policy.** Table reuse includes the known reversible history. The repetition key includes the en passant target only when a legal capture is available. The table uses raw historical targets conservatively, which can miss some equivalent entries.
 
 **Acceptance.** Changing each relevant field changes the key on targeted fixtures. Undo restores the key. With the table enabled, full-window scores agree with uncached search. Narrow-window tests cover both bound directions, and shallow entries cannot cut off deeper searches. If incremental hashing is added later, compare it with recomputation after every move and undo.
 
@@ -48,7 +48,16 @@ Keep the existing material and piece-square baseline, verify table orientation, 
 
 **Verification.** Two benchmark runs reproduced node counts, scores, and moves. Subprocess tests cover handshake, positions and move lists, fixed-depth search, cancellation, terminal `0000`, and shutdown.
 
-**Follow-up.** Extend UCI for clock-managed play and add draw adjudication before claiming full game support. Measure any move ordering or quiescence changes against the fixed benchmark and keep the current correctness checks.
+**Follow-up.** Extend UCI for clock-managed play. Dead-position adjudication and claim submission through the user interfaces remain open. Measure any move ordering or quiescence changes against the fixed benchmark and keep the current correctness checks.
+
+## 7. Repetition and move-count draws (verified)
+
+Threefold and 50-move draw claims are available through the board API, including
+when an intended move would qualify. Fivefold repetition and the 75-move rule
+end search automatically. Checkmate takes precedence on the move-count
+threshold. The same FEN can have different draw outcomes depending on prior
+moves, so the transposition table qualifies reuse with the known reversible
+history. [FIDE Laws of Chess, Articles 9.2–9.6](https://handbook.fide.com/chapter/E012023)
 
 ## Suggested commit boundaries
 
@@ -61,3 +70,4 @@ Keep the existing material and piece-square baseline, verify table orientation, 
 - `fix: store depth-qualified transposition bounds`
 - `feat: add reproducible perft and search benchmarks`
 - `feat: add a depth-limited UCI entry point`
+- `fix: adjudicate repetition and move-count draws`

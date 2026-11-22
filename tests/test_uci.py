@@ -117,6 +117,11 @@ class UciTests(unittest.TestCase):
         self.send("isready")
         self.assertEqual(self.receive(), "readyok")
 
+    def test_automatic_draw_with_legal_moves_returns_null_move(self):
+        self.send("position fen 4k3/8/8/8/3Q4/8/8/4K3 w - - 150 1")
+        self.send("go depth 2")
+        self.assertEqual(self.receive_best_move(), "bestmove 0000")
+
     def test_bad_position_is_atomic_and_diagnostics_stay_off_stdout(self):
         fen = "4k3/8/8/8/8/8/4P3/4K3 w - - 0 1"
         self.send(f"position fen {fen} moves e2e4")

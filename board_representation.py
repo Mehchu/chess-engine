@@ -1,4 +1,5 @@
 from enum import Enum
+from itertools import islice
 
 from fen_handling import CASTLING, FenPosition, display_chess_position, parse_fen
 from notation_handling import decompose_notation, encode_square
@@ -274,11 +275,96 @@ class ChessBoard:
     def generate_legal_moves(self):
         return [_move_text(move) for move in self._legal_moves()]
 
+    def reversible_history(self):
+        """Yield prior snapshots that can still matter for repetition."""
+        limit = min(self.halfmove_clock, len(self.previous_positions))
+        for position in islice(reversed(self.previous_positions), limit):
+            if position.castling_rights != self.castling_rights:
+                break
+            yield position
+
+    def _legal_en_passant_target(self):
+        target = self.en_passant
+        if target is None or self.occupancy & (1 << target):
+            return None
+        side, enemy = (WHITE, BLACK) if self.white_to_move else (BLACK, WHITE)
+        direction = 1 if self.white_to_move else -1
+        captured = 1 << (target - 8 * direction)
+        if not captured & self._boards[PAWN] & self._boards[enemy]:
+            return None
+        pawns = self._boards[PAWN] & self._boards[side]
+        for start in _steps(target, ((-1, -direction), (1, -direction))):
+            if pawns & (1 << start) and self._keeps_king_safe((start, target, None), side, enemy):
+                return target
+        return None
+
+    def repetition_key(self):
+        """Return position identity under the repetition rule."""
+        return (self.piece_bitboards, self.white_to_move, self.castling_rights,
+                self._legal_en_passant_target())
+
+    def _is_repetition(self, occurrences):
+        if min(self.halfmove_clock, len(self.previous_positions)) < occurrences - 1:
+            return False
+
+        pieces, turn, _, target = self.repetition_key()
+        matches = 1
+        for position in self.reversible_history():
+            if position.white_to_move != turn or position.piece_boards != pieces:
+                continue
+            historical_target = None
+            if position.en_passant is not None:
+                historical_target = ChessBoard(position.to_fen())._legal_en_passant_target()
+            if historical_target == target:
+                matches += 1
+                if matches == occurrences:
+                    return True
+        return False
+
+    def can_claim_threefold_repetition(self):
+        if self._is_repetition(3):
+            return True
+        if min(self.halfmove_clock, len(self.previous_positions)) < 1:
+            return False
+        for move in self._legal_moves():
+            self._push(move)
+            try:
+                if self._is_repetition(3):
+                    return True
+            finally:
+                self.undo_move()
+        return False
+
+    def can_claim_fifty_moves(self):
+        if self.halfmove_clock >= 100:
+            return next(self._legal_moves(), None) is not None
+        if self.halfmove_clock == 99:
+            for move in self._legal_moves():
+                self._push(move)
+                try:
+                    if self.halfmove_clock >= 100 and next(self._legal_moves(), None) is not None:
+                        return True
+                finally:
+                    self.undo_move()
+        return False
+
+    def automatic_draw_reason(self):
+        """Return a repetition or move-count draw for a position with legal moves."""
+        if self.halfmove_clock >= 150:
+            return "seventy-five-move rule"
+        if self._is_repetition(5):
+            return "fivefold repetition"
+        return None
+
+    def game_end_reason(self):
+        if next(self._legal_moves(), None) is None:
+            return "checkmate" if self.is_check() else "stalemate"
+        return self.automatic_draw_reason()
+
     def is_game_over(self):
         """Return terminal status and a score from the side to move's perspective."""
-        if next(self._legal_moves(), None) is not None:
-            return False, 0
-        return True, -99999 if self.is_check() else 0
+        reason = self.game_end_reason()
+        return reason is not None, -99999 if reason == "checkmate" else 0
 
     def perft(self, depth):
         if depth < 0:

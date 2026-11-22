@@ -55,7 +55,7 @@ class UciEngine:
 
     def _search(self, board, max_depth):
         moves = board.generate_legal_moves()
-        if not moves:
+        if not moves or board.automatic_draw_reason() is not None:
             self._send("bestmove 0000")
             return
         best_move = moves[0]

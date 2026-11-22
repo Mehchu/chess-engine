@@ -29,14 +29,15 @@ def main():
 
 
 def _finished(board):
-    ended, score = board.is_game_over()
-    if ended:
-        if score:
-            winner = "Black" if board.white_to_move else "White"
-            print(f"Checkmate. {winner} wins.")
-        else:
-            print("Stalemate.")
-    return ended
+    reason = board.game_end_reason()
+    if reason == "checkmate":
+        winner = "Black" if board.white_to_move else "White"
+        print(f"Checkmate. {winner} wins.")
+    elif reason == "stalemate":
+        print("Stalemate.")
+    elif reason:
+        print(f"Draw by {reason}.")
+    return reason is not None
 
 
 def playGame(board: ChessBoard):

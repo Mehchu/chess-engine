@@ -79,7 +79,13 @@ class TranspositionTable:
         self._entries = {}
 
     def key_for(self, board):
-        return self._hasher.generate_key(board), board.halfmove_clock
+        # Raw history is conservative: equivalent en passant targets may miss
+        # a hit, but positions with different repetition histories cannot share it.
+        history = tuple(
+            (position.piece_boards, position.white_to_move, position.en_passant)
+            for position in board.reversible_history()
+        )
+        return self._hasher.generate_key(board), board.halfmove_clock, history
 
     def lookup(self, key, depth):
         # Different horizons can yield different fixed-depth scores.
@@ -99,16 +105,17 @@ def _adjust_mate_score(score, ply_offset):
 
 def _moves_or_score(board, depth, ply):
     if depth == 0:
-        ended, _ = board.is_game_over()
+        ended, terminal = board.is_game_over()
         if not ended:
             return (), eval.evaluate(board)
-        moves = ()
-    else:
-        moves = board.generate_legal_moves()
-        if moves:
-            return moves, None
+        return (), -MATE_SCORE + ply if terminal else 0
 
-    return moves, -MATE_SCORE + ply if board.is_check() else 0
+    moves = board.generate_legal_moves()
+    if not moves:
+        return (), -MATE_SCORE + ply if board.is_check() else 0
+    if board.automatic_draw_reason() is not None:
+        return (), 0
+    return moves, None
 
 
 def negamax(board, depth):

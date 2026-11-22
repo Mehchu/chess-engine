@@ -46,3 +46,11 @@
 - Added a separate depth-limited UCI entry point. The worker searches successive depths and returns the last completed answer on `stop`, with a legal fallback if stopped before depth one. It shares the existing alpha–beta implementation and restores the board when cancellation unwinds.
 - Verified subprocess transcripts and a handshake and depth-two search with the asynchronous python-chess UCI client. Clock-managed play, pondering, and draw adjudication beyond stalemate remain open.
 - The synchronous python-chess smoke test timed out before it sent a search command. A standalone cross-thread asyncio wakeup also timed out in this environment. Direct subprocess transcripts and the asynchronous UCI client completed successfully.
+
+### Repetition and move-count draws
+
+- Added python-chess comparisons for threefold claims, fivefold repetition, and the 50- and 75-move thresholds. Tests cover intended moves, unusable and pinned en passant targets, undo, and checkmate on the threshold move.
+- Search and both interfaces stop automatically on fivefold repetition and the 75-move rule. The board API reports claim availability separately. Submitting a claim through an interface and adjudicating dead positions remain open.
+- Transposition reuse now includes the known reversible history. A regression searches identical FENs with different histories using the same table and gets the correct result for each.
+- All 36 tests passed. Two benchmark runs reproduced perft counts, search node counts, best moves, and scores. The counts and scores matched the prior baseline.
+- Suggested commit `fix: adjudicate repetition and move-count draws`.
