@@ -67,8 +67,7 @@ the active side's remaining time and increment, divides the clock by
 can be combined with either time control. The worker checks a monotonic
 deadline at each search node and retains the last completed result.
 
-The next step is a bounded transposition table so longer searches have a
-predictable memory footprint.
+The transposition table now caps its number of entries to bound cache growth.
 
 ## 9. Profile-guided move and search performance (verified)
 
@@ -112,6 +111,13 @@ Use `python -m benchmark --quiescence` to measure the active leaf policy.
 | 5 | Evaluation and test data | The evaluator has material, piece-square, passed-pawn, and bishop-pair terms. The existing weight matches left many games unfinished. Expand the opening and tactical corpora before tuning or adding mobility or king-safety terms. |
 | 6 | UCI and maintenance | The time allocator uses a fixed moves-to-go estimate and a hard deadline. Measure completed depth and deadline overruns on full clocked games before adding soft limits or position-dependent budgets. Report a full principal variation for GUI analysis. The unused Monte Carlo scaffold contains incomplete methods and should be isolated or retired in a focused cleanup. |
 
+## 13. First four review priorities (implemented)
+
+- The CLI and UCI validate playable FENs at their input boundaries, while the codec remains available for syntax-only tools. Basic insufficient-material draws are terminal. General dead-position detection remains open.
+- UCI tries the previous iteration's best root move first. Main search scores continue to use exact-depth bounds.
+- Move generation filters checks and king pins before testing moves, and tactical sliders jump to their first blocker. Projected occupancy verifies king moves, en passant, and candidates that survive check and pin restrictions. Seeded python-chess comparisons and perft cover the fast path.
+- The transposition table is bounded at 32,768 entries by default and evicts the oldest entry first. Slotted snapshots keep the complete undo state with a smaller object footprint. In the cached Kiwipete profile, cache keys cost about 4% of execution time and snapshots and restores together cost under 3%. Incremental keys and delta undo remain candidates if deeper profiles justify the added state.
+
 ## Suggested commit boundaries
 
 - `chore: add runtime and development dependency files`
@@ -129,3 +135,6 @@ Use `python -m benchmark --quiescence` to measure the active leaf policy.
 - `feat: taper king evaluation by material phase`
 - `feat: evaluate passed pawns and opposite-colour bishop pairs`
 - `feat: extend tactical leaves with quiescence search`
+- `fix: validate playable positions and adjudicate basic material draws`
+- `perf: prioritise the previous best move and filter legal candidates`
+- `perf: bound transposition entries and compact position snapshots`

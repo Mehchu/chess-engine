@@ -12,7 +12,7 @@ A Python chess-engine prototype exploring bitboard representations, game-tree se
 - Deterministic Zobrist position hashing and depth-qualified cache bounds.
 - Interactive command-line interface, fixed-depth and clock-managed UCI mode, and reproducible benchmarks.
 
-**Status:** early-stage experimental engine. Legal moves and position restoration are covered by perft and python-chess comparisons. Uncached search is checked against independent minimax. Cached search is checked against the uncached baseline. Search adjudicates stalemate, fivefold repetition, and the 75-move rule. Dead-position detection and draw-claim submission remain in development.
+**Status:** early-stage experimental engine. Legal moves and position restoration are covered by perft and python-chess comparisons. Uncached search is checked against independent minimax. Cached search is checked against the uncached baseline. Search adjudicates stalemate, fivefold repetition, and the 75-move rule. The engine detects basic insufficient-material draws. General dead-position detection and draw-claim submission remain in development.
 
 ## Getting started
 
