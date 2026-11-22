@@ -79,6 +79,25 @@ class SearchTests(unittest.TestCase):
         mirrored = chess.Board(fen).mirror().fen()
         self.assertEqual(negamax(ChessBoard(mirrored), 0)[1], white_score)
 
+    def test_evaluation_preserves_piece_square_scores(self):
+        from evaluation_functions import EvaluationFunction, table_array
+
+        evaluator = EvaluationFunction()
+        positions = (
+            "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
+            "1N2k3/5p2/8/3r4/8/4B3/2P5/4K3 b - - 0 1",
+        )
+        for fen in positions:
+            with self.subTest(fen=fen):
+                reference = chess.Board(fen)
+                white_score = sum(
+                    int(table_array[piece.piece_type - 1][square ^ (7 if piece.color else 63)])
+                    * (1 if piece.color else -1)
+                    for square, piece in reference.piece_map().items()
+                )
+                expected = white_score if reference.turn else -white_score
+                self.assertEqual(evaluator.evaluate(ChessBoard(fen)), expected)
+
     def test_narrow_windows_restore_existing_history(self):
         board = ChessBoard("4k3/8/8/8/3Q4/8/8/4K3 w - - 0 1")
         board.make_move("d4d5")

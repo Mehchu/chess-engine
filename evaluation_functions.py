@@ -446,6 +446,22 @@ table_array = [
 ]
 
 
+# Tables were stored in reverse a8-first order. Orient them once for each colour.
+_WHITE_TABLES = tuple(tuple(int(table[square ^ 7]) for square in range(64)) for table in table_array)
+_BLACK_TABLES = tuple(tuple(int(table[square ^ 63]) for square in range(64)) for table in table_array)
+
+
+def _colour_score(occupancy, piece_masks, tables):
+    score = 0
+    for pieces, table in zip(piece_masks, tables):
+        mask = occupancy & pieces
+        while mask:
+            bit = mask & -mask
+            score += table[bit.bit_length() - 1]
+            mask ^= bit
+    return score
+
+
 class EvaluationFunction:
     def __init__(self) -> None:
         # Piece values
@@ -459,26 +475,14 @@ class EvaluationFunction:
         }
 
     def evaluate(self, board) -> float:
-        eval = 0
-
-        # Material evaluation
-        eval += 1.0 * self.evaluate_material(board)
-
-        return eval
+        return self.evaluate_material(board)
 
     def evaluate_material(self, board) -> float:
-        white_score = 0.0
-        for square in range(64):
-            piece = board.determine_piece_on_square(square)
-            if piece is None:
-                continue
-            table = table_array[piece_to_index[piece.upper()]]
-            # The stored arrays were reversed from a8-first, h1-last layout.
-            if piece.isupper():
-                white_score += table[square ^ 7]
-            else:
-                white_score -= table[square ^ 63]
-        return white_score if board.white_to_move else -white_score
+        *pieces, white, black = board.piece_bitboards
+        white_score = _colour_score(white, pieces, _WHITE_TABLES)
+        black_score = _colour_score(black, pieces, _BLACK_TABLES)
+        score = white_score - black_score
+        return float(score if board.white_to_move else -score)
 
     def evaluate_pawn_structure(self, board) -> float:
         # Evaluate pawn structure (e.g., isolated pawns, doubled pawns, passed pawns)

@@ -70,6 +70,13 @@ deadline at each search node and retains the last completed result.
 The next step is a bounded transposition table so longer searches have a
 predictable memory footprint.
 
+## 9. Profile-guided move and search performance (verified)
+
+Precompute attack masks, test king safety using projected occupancy, and
+stream generated moves into search. Keep the existing evaluation and move
+ordering as regression baselines. The before/after results are recorded in
+[PROGRESS.md](PROGRESS.md#move-generation-and-search-performance).
+
 ## Suggested commit boundaries
 
 - `chore: add runtime and development dependency files`
@@ -83,3 +90,4 @@ predictable memory footprint.
 - `feat: add a depth-limited UCI entry point`
 - `fix: adjudicate repetition and move-count draws`
 - `feat: support clock-managed UCI search`
+- `perf: speed up king-safety checks and search traversal`

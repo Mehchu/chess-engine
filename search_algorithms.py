@@ -1,8 +1,10 @@
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum, auto
+from itertools import chain
 from random import Random
 
+from board_representation import Move, move_to_uci
 from evaluation_functions import EvaluationFunction
 
 MATE_SCORE = 100_000
@@ -66,7 +68,7 @@ class Bound(Enum):
 
 @dataclass(frozen=True)
 class TranspositionEntry:
-    move: str | None
+    move: Move | None
     score: float
     bound: Bound
 
@@ -110,19 +112,21 @@ def _moves_or_score(board, depth, ply):
             return (), eval.evaluate(board)
         return (), -MATE_SCORE + ply if terminal else 0
 
-    moves = board.generate_legal_moves()
-    if not moves:
+    moves = board._legal_moves()
+    first = next(moves, None)
+    if first is None:
         return (), -MATE_SCORE + ply if board.is_check() else 0
     if board.automatic_draw_reason() is not None:
         return (), 0
-    return moves, None
+    return chain((first,), moves), None
 
 
 def negamax(board, depth):
     """Return a best move and exact score from the root side's perspective."""
     if depth < 0:
         raise ValueError("Search depth must be non-negative")
-    return _negamax(board, depth, 0)
+    move, score = _negamax(board, depth, 0)
+    return (move_to_uci(move) if move is not None else None), score
 
 
 def _negamax(board, depth, ply):
@@ -132,7 +136,7 @@ def _negamax(board, depth, ply):
 
     best_move, best_score = None, -float("inf")
     for move in moves:
-        board.make_move(move)
+        board._push(move)
         try:
             _, child_score = _negamax(board, depth - 1, ply + 1)
         finally:
@@ -152,7 +156,8 @@ def negamax_alpha_beta_top(
         raise ValueError("Search depth must be non-negative")
     if not alpha < beta:
         raise ValueError("Alpha must be less than beta")
-    return _alpha_beta(board, depth, alpha, beta, 0, table, control)
+    move, score = _alpha_beta(board, depth, alpha, beta, 0, table, control)
+    return (move_to_uci(move) if move is not None else None), score
 
 
 def negamax_alpha_beta(board, depth, alpha=-float("inf"), beta=float("inf"), *, table=None):
@@ -193,7 +198,7 @@ def _search_node(board, depth, alpha, beta, ply, table, control):
 
     best_move, best_score = None, -float("inf")
     for move in moves:
-        board.make_move(move)
+        board._push(move)
         try:
             _, child_score = _alpha_beta(
                 board, depth - 1, -beta, -alpha, ply + 1, table, control

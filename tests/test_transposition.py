@@ -58,7 +58,7 @@ class TranspositionTests(unittest.TestCase):
                 expected = negamax_alpha_beta_top(board, depth)
                 table = TranspositionTable()
                 self.assertEqual(negamax_alpha_beta_top(board, depth, table=table), expected)
-                with patch.object(board, "generate_legal_moves", side_effect=AssertionError):
+                with patch.object(board, "_legal_moves", side_effect=AssertionError):
                     self.assertEqual(negamax_alpha_beta_top(board, depth, table=table), expected)
                 self.assertEqual(board.to_fen(), fen)
                 self.assertFalse(board.previous_positions)
@@ -73,7 +73,7 @@ class TranspositionTests(unittest.TestCase):
                 alpha, beta = (edge - 1, edge) if offset < 0 else (edge, edge + 1)
                 result = negamax_alpha_beta_top(board, 2, alpha, beta, table=table)
                 self.assertEqual(table.lookup(table.key_for(board), 2).bound.name, bound_name)
-                with patch.object(board, "generate_legal_moves", side_effect=AssertionError):
+                with patch.object(board, "_legal_moves", side_effect=AssertionError):
                     self.assertEqual(negamax_alpha_beta_top(board, 2, alpha, beta, table=table), result)
                 self.assertEqual(negamax_alpha_beta_top(board, 2, table=table), expected)
 

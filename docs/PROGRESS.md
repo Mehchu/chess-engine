@@ -61,3 +61,23 @@
 - The worker uses a monotonic deadline and the existing search cancellation callback. At the deadline it returns the most recent completed depth, with a legal fallback for zero or very short budgets.
 - All 41 tests passed. Subprocess tests cover zero and short budgets, active-side clock selection, combined limits, readiness during search, and manual stop. The asynchronous python-chess UCI client returned legal moves with both time-control forms.
 - Next step is to bound transposition-table memory. Suggested commit `feat: support clock-managed UCI search`.
+
+### Move generation and search performance
+
+- Profiled the existing corpus with `python -m cProfile -m benchmark`. King-safety checks, move validation, and leaf evaluation dominated the run.
+- Precomputed attack masks and sliding paths. Candidate legality uses projected occupancy and captured-piece masks, including the en passant capture square and castling rook movement. Full make/undo snapshots are still used for moves played and nodes searched.
+- Search consumes generated move tuples lazily and formats the root move for the caller. This avoids parsing and revalidating moves and stops generating siblings at a cutoff. Evaluation walks occupied bitboards with the original piece-square values oriented ahead of time.
+- Compared medians from three runs of `python -m benchmark --repeat 3` before and after on CPython 3.14.8, based on `68ee361`. All perft counts, search node counts, best moves, and scores matched.
+
+| Position | Workload | Before | After | Speedup |
+| --- | --- | ---: | ---: | ---: |
+| Starting position | Perft depth 4 | 2.032 s | 0.469 s | 4.3× |
+| Kiwipete | Perft depth 3 | 0.924 s | 0.182 s | 5.1× |
+| Starting position | Uncached search depth 3 | 0.155 s | 0.017 s | 9.0× |
+| Kiwipete | Uncached search depth 3 | 1.276 s | 0.127 s | 10.1× |
+| Starting position | Fresh-table search depth 3 | 0.171 s | 0.029 s | 5.9× |
+| Kiwipete | Fresh-table search depth 3 | 1.422 s | 0.217 s | 6.5× |
+
+- All 42 tests passed. Starting-position perft at depth five returned 4,865,609. Legal move sets, check status, and FEN agreed with python-chess across 1,200 additional seeded positions.
+- The fresh table still costs more time than uncached search on both depth-three cases. These measurements cover the fixed corpus on one machine.
+- Suggested commit `perf: speed up king-safety checks and search traversal`.

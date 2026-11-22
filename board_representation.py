@@ -27,6 +27,7 @@ class PieceType(Enum):
 
 PAWN, KNIGHT, BISHOP, ROOK, QUEEN, KING = (piece.value for piece in PieceType)
 PROMOTIONS = "qrbn"
+Move = tuple[int, int, str | None]
 
 
 class GameOver(Exception):
@@ -47,6 +48,44 @@ def _steps(square, directions):
             yield target
 
 
+def _ray_squares(square, dx, dy):
+    target = _offset(square, dx, dy)
+    while target is not None:
+        yield target
+        target = _offset(target, dx, dy)
+
+
+def _square_mask(squares):
+    return sum(1 << square for square in squares)
+
+
+KNIGHT_TARGETS = tuple(tuple(_steps(square, KNIGHT_STEPS)) for square in range(64))
+KING_TARGETS = tuple(tuple(_steps(square, KING_STEPS)) for square in range(64))
+KNIGHT_ATTACKS = tuple(map(_square_mask, KNIGHT_TARGETS))
+KING_ATTACKS = tuple(map(_square_mask, KING_TARGETS))
+PAWN_SOURCES = {
+    side: tuple(_square_mask(_steps(square, ((-1, rank), (1, rank))))
+                for square in range(64))
+    for side, rank in ((WHITE, -1), (BLACK, 1))
+}
+RAY_SQUARES = {
+    directions: tuple(tuple(tuple(_ray_squares(square, dx, dy)) for dx, dy in directions)
+                      for square in range(64))
+    for directions in (ORTHOGONAL, DIAGONAL, KING_STEPS)
+}
+RAY_MASKS = {
+    directions: tuple(tuple((_square_mask(ray), dx + 8 * dy > 0)
+                            for ray, (dx, dy) in zip(rays, directions))
+                      for rays in RAY_SQUARES[directions])
+    for directions in (ORTHOGONAL, DIAGONAL)
+}
+
+
+def _castle_rook_mask(start, end):
+    rook_start, rook_end = (start + 3, start + 1) if end > start else (start - 4, start - 1)
+    return (1 << rook_start) | (1 << rook_end)
+
+
 def _squares(mask):
     while mask:
         bit = mask & -mask
@@ -54,7 +93,7 @@ def _squares(mask):
         mask ^= bit
 
 
-def _move_text(move):
+def move_to_uci(move: Move) -> str:
     start, end, promotion = move
     return encode_square(start) + encode_square(end) + (promotion or "")
 
@@ -106,7 +145,10 @@ class ChessBoard:
         return self._snapshot().to_fen()
 
     def _piece_type(self, mask):
-        return next((index for index in range(6) if self._boards[index] & mask), None)
+        for index in range(6):
+            if self._boards[index] & mask:
+                return index
+        return None
 
     def determine_piece_on_square(self, square):
         mask = 1 << square
@@ -125,15 +167,19 @@ class ChessBoard:
             raise ValueError(f"Illegal move: {notation}")
         self._push(move)
 
+    def _capture_mask(self, end, end_mask, is_pawn, side):
+        if is_pawn and end == self.en_passant and not self.occupancy & end_mask:
+            return 1 << (end - 8 if side == WHITE else end + 8)
+        return end_mask
+
     def _push(self, move):
+        """Apply a generated legal move without validating it again."""
         start, end, promotion = move
         start_mask, end_mask = 1 << start, 1 << end
         side, enemy = (WHITE, BLACK) if self.white_to_move else (BLACK, WHITE)
         piece = self._piece_type(start_mask)
-        capture_mask = end_mask
-        if piece == PAWN and end == self.en_passant and not self.occupancy & end_mask:
-            capture_mask = 1 << (end - 8 if side == WHITE else end + 8)
-        captured = self._piece_type(capture_mask)
+        capture_mask = self._capture_mask(end, end_mask, piece == PAWN, side)
+        captured = self._piece_type(capture_mask) if self._boards[enemy] & capture_mask else None
         self.previous_positions.append(self._snapshot())
 
         if captured is not None:
@@ -150,10 +196,7 @@ class ChessBoard:
         if piece == KING:
             self.castling_rights &= ~KING_RIGHTS[side]
             if abs(end - start) == 2:
-                rook_start, rook_end = (start + 3, start + 1) if end > start else (
-                    start - 4, start - 1
-                )
-                rook_move = (1 << rook_start) | (1 << rook_end)
+                rook_move = _castle_rook_mask(start, end)
                 self._boards[ROOK] ^= rook_move
                 self._boards[side] ^= rook_move
         elif piece == ROOK:
@@ -169,33 +212,39 @@ class ChessBoard:
 
     def _rays(self, square, directions):
         occupied = self.occupancy
-        for dx, dy in directions:
-            target = _offset(square, dx, dy)
-            while target is not None:
+        for ray in RAY_SQUARES[directions][square]:
+            for target in ray:
                 yield target
                 if occupied & (1 << target):
                     break
-                target = _offset(target, dx, dy)
 
-    def _attacked(self, square, attacker):
-        attackers = self._boards[attacker]
-        pawn_sources = ((-1, -1), (1, -1)) if attacker == WHITE else ((-1, 1), (1, 1))
-        for piece, directions in ((PAWN, pawn_sources), (KNIGHT, KNIGHT_STEPS), (KING, KING_STEPS)):
-            mask = attackers & self._boards[piece]
-            if any(mask & (1 << target) for target in _steps(square, directions)):
-                return True
+    def _attacked(self, square, attacker, occupied, removed=0):
+        boards = self._boards
+        attackers = boards[attacker] & ~removed
+        nearby = ((boards[PAWN] & PAWN_SOURCES[attacker][square])
+                  | (boards[KNIGHT] & KNIGHT_ATTACKS[square])
+                  | (boards[KING] & KING_ATTACKS[square]))
+        if attackers & nearby:
+            return True
+
         for piece, directions in ((ROOK, ORTHOGONAL), (BISHOP, DIAGONAL)):
-            mask = attackers & (self._boards[piece] | self._boards[QUEEN])
-            if mask and any(mask & (1 << target) for target in self._rays(square, directions)):
-                return True
+            sliders = attackers & (boards[piece] | boards[QUEEN])
+            if not sliders:
+                continue
+            for ray, ascending in RAY_MASKS[directions][square]:
+                if not ray & sliders:
+                    continue
+                blockers = ray & occupied
+                # A slider on the ray guarantees at least one occupied square.
+                first = blockers & -blockers if ascending else 1 << (blockers.bit_length() - 1)
+                if first & sliders:
+                    return True
         return False
 
-    def _in_check(self, side, enemy):
-        king = self._boards[KING] & self._boards[side]
-        return bool(king and self._attacked(king.bit_length() - 1, enemy))
-
     def is_check(self):
-        return self._in_check(WHITE, BLACK) if self.white_to_move else self._in_check(BLACK, WHITE)
+        side, enemy = (WHITE, BLACK) if self.white_to_move else (BLACK, WHITE)
+        king = self._boards[KING] & self._boards[side]
+        return bool(king and self._attacked(king.bit_length() - 1, enemy, self.occupancy))
 
     def _pawn_targets(self, square, side, enemy):
         direction = 1 if side == WHITE else -1
@@ -224,7 +273,7 @@ class ChessBoard:
         home = 4 if side == WHITE else 60
         if square != home or not self.castling_rights & KING_RIGHTS[side]:
             return
-        if self._attacked(square, enemy):
+        if self._attacked(square, enemy, self.occupancy):
             return
         for step, rook, empty in ((1, home + 3, (home + 1, home + 2)),
                                   (-1, home - 4, (home - 1, home - 2, home - 3))):
@@ -234,7 +283,7 @@ class ChessBoard:
                 continue
             if any(self.occupancy & (1 << target) for target in empty):
                 continue
-            if not self._attacked(home + step, enemy):
+            if not self._attacked(home + step, enemy, self.occupancy):
                 yield home, home + 2 * step, None
 
     def _candidates(self, side, enemy):
@@ -245,9 +294,9 @@ class ChessBoard:
                 yield from self._pawn_targets(square, side, enemy)
                 continue
             if piece == KNIGHT:
-                targets = _steps(square, KNIGHT_STEPS)
+                targets = KNIGHT_TARGETS[square]
             elif piece == KING:
-                targets = _steps(square, KING_STEPS)
+                targets = KING_TARGETS[square]
                 yield from self._castle_moves(square, side, enemy)
             elif piece == BISHOP:
                 targets = self._rays(square, DIAGONAL)
@@ -260,11 +309,21 @@ class ChessBoard:
                     yield square, target, None
 
     def _keeps_king_safe(self, move, side, enemy):
-        self._push(move)
-        try:
-            return not self._in_check(side, enemy)
-        finally:
-            self.undo_move()
+        # Project occupancy only. Attacks can change through captures, king
+        # moves, and castling without updating clocks or saving a snapshot.
+        start, end, _ = move
+        start_mask, end_mask = 1 << start, 1 << end
+        king = self._boards[KING] & self._boards[side]
+        if not king:
+            return True
+
+        captured = self._capture_mask(end, end_mask, self._boards[PAWN] & start_mask, side)
+        occupied = (self.occupancy & ~(start_mask | captured)) | end_mask
+        if king & start_mask:
+            king = (king & ~start_mask) | end_mask
+            if abs(end - start) == 2:
+                occupied ^= _castle_rook_mask(start, end)
+        return not self._attacked(king.bit_length() - 1, enemy, occupied, captured)
 
     def _legal_moves(self):
         side, enemy = (WHITE, BLACK) if self.white_to_move else (BLACK, WHITE)
@@ -273,7 +332,7 @@ class ChessBoard:
                 yield move
 
     def generate_legal_moves(self):
-        return [_move_text(move) for move in self._legal_moves()]
+        return [move_to_uci(move) for move in self._legal_moves()]
 
     def reversible_history(self):
         """Yield prior snapshots that can still matter for repetition."""
@@ -389,7 +448,7 @@ class ChessBoard:
         for move in self._legal_moves():
             self._push(move)
             try:
-                counts[_move_text(move)] = self.perft(depth - 1)
+                counts[move_to_uci(move)] = self.perft(depth - 1)
             finally:
                 self.undo_move()
         return counts
