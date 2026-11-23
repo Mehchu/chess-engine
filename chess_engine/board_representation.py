@@ -61,6 +61,28 @@ def _square_mask(squares):
     return sum(1 << square for square in squares)
 
 
+def _pawn_geometry(square, direction):
+    first_rank = 1 if direction == 1 else 6
+    last_rank = 7 if direction == 1 else 0
+
+    def destination(target):
+        promotions = PROMOTIONS if target // 8 == last_rank else (None,)
+        return 1 << target, tuple((square, target, promotion) for promotion in promotions)
+
+    ahead = _offset(square, 0, direction)
+    forward = destination(ahead) if ahead is not None else None
+    double = destination(square + 16 * direction) if square // 8 == first_rank else None
+    captures = tuple(
+        (target, *destination(target))
+        for target in _steps(square, ((-1, direction), (1, direction)))
+    )
+    return forward, double, captures
+
+
+PAWN_GEOMETRY = {
+    side: tuple(_pawn_geometry(square, direction) for square in range(64))
+    for side, direction in ((WHITE, 1), (BLACK, -1))
+}
 KNIGHT_TARGETS = tuple(tuple(_steps(square, KNIGHT_STEPS)) for square in range(64))
 KING_TARGETS = tuple(tuple(_steps(square, KING_STEPS)) for square in range(64))
 KNIGHT_ATTACKS = tuple(map(_square_mask, KNIGHT_TARGETS))
@@ -309,29 +331,24 @@ class ChessBoard:
         return bool(king and self._attacked(king.bit_length() - 1, enemy, self.occupancy))
 
     def _pawn_targets(self, square, side, enemy, tactical_only):
-        direction = 1 if side == WHITE else -1
-        first_rank = 1 if side == WHITE else 6
-        last_rank = 7 if side == WHITE else 0
-        targets = []
-        advance = _offset(square, 0, direction)
-        if (advance is not None
-                and (not tactical_only or advance // 8 == last_rank)
-                and not self.occupancy & (1 << advance)):
-            targets.append(advance)
-            double = advance + 8 * direction
-            if square // 8 == first_rank and not self.occupancy & (1 << double):
-                targets.append(double)
-        enemy_pieces = self._boards[enemy] & ~self._boards[KING]
-        for target in _steps(square, ((-1, direction), (1, direction))):
-            if enemy_pieces & (1 << target):
-                targets.append(target)
-            elif target == self.en_passant and not self.occupancy & (1 << target):
-                captured = 1 << (target - 8 * direction)
-                if captured & self._boards[PAWN] & self._boards[enemy]:
-                    targets.append(target)
-        for target in targets:
-            for promotion in PROMOTIONS if target // 8 == last_rank else (None,):
-                yield square, target, promotion
+        forward, double, captures = PAWN_GEOMETRY[side][square]
+        occupied = self.occupancy
+        if forward is not None:
+            mask, moves = forward
+            if (not tactical_only or moves[0][2] is not None) and not occupied & mask:
+                yield from moves
+                if double is not None and not occupied & double[0]:
+                    yield from double[1]
+
+        enemy_pieces = self._boards[enemy]
+        targets = enemy_pieces & ~self._boards[KING]
+        for target, mask, moves in captures:
+            if targets & mask:
+                yield from moves
+            elif target == self.en_passant and not occupied & mask:
+                captured = mask >> 8 if side == WHITE else mask << 8
+                if captured & self._boards[PAWN] & enemy_pieces:
+                    yield from moves
 
     def _castle_moves(self, square, side, enemy):
         home = 4 if side == WHITE else 60
@@ -424,18 +441,27 @@ class ChessBoard:
             evasion = 0
         return (evasion if checkers else None), pins
 
-    def _legal_moves(self, *, tactical_only=False):
+    def _move_context(self):
         side, enemy = (WHITE, BLACK) if self.white_to_move else (BLACK, WHITE)
-        moves = self._candidates(side, enemy, tactical_only=tactical_only)
         king = self._boards[KING] & self._boards[side]
         if king.bit_count() != 1:
+            return side, enemy, None, None, {}
+        king_square = king.bit_length() - 1
+        evasion, pins = self._king_constraints(king_square, side, enemy)
+        return side, enemy, king_square, evasion, pins
+
+    def _legal_moves(self, *, tactical_only=False, context=None):
+        # A caller may reuse the context for another pass over the same position.
+        side, enemy, king_square, evasion, pins = (
+            self._move_context() if context is None else context
+        )
+        moves = self._candidates(side, enemy, tactical_only=tactical_only)
+        if king_square is None:
             for move in moves:
                 if self._keeps_king_safe(move, side, enemy):
                     yield move
             return
 
-        king_square = king.bit_length() - 1
-        evasion, pins = self._king_constraints(king_square, side, enemy)
         for move in moves:
             start, end, _ = move
             # En passant changes occupancy at three squares, so give it the

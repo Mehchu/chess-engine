@@ -3,6 +3,7 @@ import unittest
 import chess
 
 from chess_engine.board_representation import ChessBoard
+from chess_engine import evaluation_functions as evaluation
 from chess_engine.evaluation_functions import EvaluationFunction
 
 
@@ -12,6 +13,31 @@ class EvaluationTermsTests(unittest.TestCase):
 
     def pawn_score(self, fen):
         return self.evaluator.evaluate_pawn_structure(ChessBoard(fen))
+
+    def test_cached_evaluation_matches_uncached_terms_after_make_and_undo(self):
+        fen = "4k3/P7/2r5/8/3P4/8/4R3/4K3 w - - 0 1"
+        board = ChessBoard(fen)
+
+        def expected():
+            masks = board.piece_bitboards
+            pawns, _, bishops, _, _, _, white, black = masks
+            phase = evaluation._material_phase(masks)
+            pawn_score = evaluation._passed_pawn_score.__wrapped__(pawns & white, pawns & black, phase)
+            pair_score = (evaluation._bishop_pair_score(bishops & white)
+                          - evaluation._bishop_pair_score(bishops & black))
+            return evaluation._position_score(
+                masks, board.white_to_move, evaluation._WHITE_PHASE_TABLES[phase],
+                evaluation._BLACK_PHASE_TABLES[phase], pawn_score + pair_score,
+            )
+
+        initial = expected()
+        for move in ("a7a8q", "a7a8n", "e2e7"):
+            with self.subTest(move=move):
+                board.make_move(move)
+                self.assertEqual(self.evaluator.evaluate(board), expected())
+                self.assertEqual(self.evaluator.evaluate(board), expected())
+                board.undo_move()
+                self.assertEqual(self.evaluator.evaluate(board), initial)
 
     def test_passed_pawn_bonus_grows_with_advancement(self):
         fourth = "4k3/8/8/8/4P3/8/8/4K3 w - - 0 1"

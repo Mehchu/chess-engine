@@ -1,3 +1,5 @@
+from functools import lru_cache
+
 import numpy as np
 
 piece_to_index = {"P": 0, "N": 1, "B": 2, "R": 3, "Q": 4, "K": 5}
@@ -528,6 +530,7 @@ def _passed_rank_score(pawns, bonuses, rank_flip):
     return score
 
 
+@lru_cache(maxsize=8192)
 def _passed_pawn_score(white_pawns, black_pawns, phase):
     # The opposing pawn spans mark squares from which a pawn could still be
     # stopped by an enemy pawn on its file or an adjacent file.
@@ -548,14 +551,43 @@ def _bishop_pair_score(bishops):
     return 0
 
 
+def _mask_score(mask, table):
+    score = 0
+    while mask:
+        bit = mask & -mask
+        score += table[bit.bit_length() - 1]
+        mask ^= bit
+    return score
+
+
 def _colour_score(occupancy, piece_masks, tables):
     score = 0
     for pieces, table in zip(piece_masks, tables):
-        mask = occupancy & pieces
-        while mask:
-            bit = mask & -mask
-            score += table[bit.bit_length() - 1]
-            mask ^= bit
+        score += _mask_score(occupancy & pieces, table)
+    return score
+
+
+def _memoized_table(table):
+    @lru_cache(maxsize=1024)
+    def score(mask):
+        return _mask_score(mask, table)
+
+    return score
+
+
+# Only the king's table changes with material phase. The other tables can
+# reuse scores whenever their individual piece masks have not changed.
+_WHITE_PIECE_SCORES = tuple(map(_memoized_table, _WHITE_TABLES[:-1]))
+_BLACK_PIECE_SCORES = tuple(map(_memoized_table, _BLACK_TABLES[:-1]))
+
+
+def _cached_position_score(boards, phase):
+    _, _, _, _, _, kings, white, black = boards
+    score = 0
+    for pieces, white_score, black_score in zip(boards, _WHITE_PIECE_SCORES, _BLACK_PIECE_SCORES):
+        score += white_score(pieces & white) - black_score(pieces & black)
+    score += _mask_score(kings & white, _WHITE_PHASE_TABLES[phase][-1])
+    score -= _mask_score(kings & black, _BLACK_PHASE_TABLES[phase][-1])
     return score
 
 
@@ -585,9 +617,8 @@ class EvaluationFunction:
         phase = _material_phase(boards)
         bonus = _passed_pawn_score(pawns & white, pawns & black, phase)
         bonus += _bishop_pair_score(bishops & white) - _bishop_pair_score(bishops & black)
-        return _position_score(
-            boards, board.white_to_move, _WHITE_PHASE_TABLES[phase], _BLACK_PHASE_TABLES[phase], bonus
-        )
+        score = _cached_position_score(boards, phase) + bonus
+        return float(score if board.white_to_move else -score)
 
     def evaluate_material(self, board) -> float:
         """Return the original material and piece-square baseline."""

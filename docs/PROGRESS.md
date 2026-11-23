@@ -221,3 +221,22 @@ rnbq1rk1/ppp2pbp/3p1np1/4p3/2PPP3/2N2N2/PP2BPPP/R1BQK2R w KQ - 0 7
 - The repeat scored 9/10 in complete pairs, a nominal 1702 versus the earlier 5.5/10 and 1355. Only two starting positions had both games finish in both runs. Each moved from a split pair to two wins. Across all 24 games, assigning all unfinished games losses or wins gives nominal endpoints of 1378 and 1737. These endpoints reflect the ply cap. They do not include sampling or calibration uncertainty.
 
 - The Stockfish 1700 check used the same four opening positions and time limit. Only one pair completed, so the result cannot validate the 1702 point estimate at the higher setting.
+
+### 23 November 2026 · Pawns, evaluation, and quiescence performance
+
+- Profiled the quiescence benchmark before touching the hot paths. Cumulative time in pawn generation was 0.591 s and in evaluation 0.535 s. Standard pawn destinations and promotion tuples are now precomputed, so move generation applies occupancy rules without recalculating the geometry. [Classical Stockfish pawn generation](https://github.com/official-stockfish/Stockfish/blob/sf_11/src/movegen.cpp#L45-L159)
+- Added bounded caches for pawn scores keyed by both pawn masks and material phase, and for phase-independent piece-square subtotals keyed by their individual piece masks. King terms still use the table for the current phase. This keeps the scoring function exact. [Classical Stockfish pawn cache](https://github.com/official-stockfish/Stockfish/blob/sf_11/src/pawns.cpp#L143-L161)
+- Reused the same king constraints for quiescence terminal detection and tactical move generation. In the follow-up profile, pawn generation fell to 0.151 s and evaluation to 0.249 s. Candidate move enumeration remains the largest cumulative board cost.
+
+Five-run medians from `python -m benchmark --repeat 5 --quiescence` on
+CPython 3.14.8, with the baseline at `d8850a7`. The new timings include the
+bounded evaluation caches, which are warm after the first run.
+
+| Workload | Starting position before → after | Kiwipete before → after |
+| --- | ---: | ---: |
+| Perft | 278 → 239 ms | 94 → 85 ms |
+| Uncached depth-three search | 31.8 → 22.1 ms | 348 → 250 ms |
+| Fresh-table depth-three search | 45.3 → 34.3 ms | 371 → 276 ms |
+
+- Perft counts, search node counts, scores and best moves matched the baseline. All 73 tests passed. An extra 1,200 seeded positions matched python-chess for full and tactical move sets and matched uncached evaluation.
+- Suggested commit `perf: reuse pawn geometry and evaluation subtotals`.

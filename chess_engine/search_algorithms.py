@@ -248,24 +248,28 @@ def _search_node(board, depth, alpha, beta, ply, table, control, quiescence, pre
 
 
 def _quiescence(board, alpha, beta, ply, control, remaining=MAX_QUIESCENCE_PLIES):
-    # Check terminal rules before accepting static evaluation. A checked side
-    # must move, so it cannot use its current score as a lower bound.
-    evasions, terminal_score = _moves_or_score(board, 1, ply)
-    if terminal_score is not None:
-        return terminal_score
-    in_check = board.is_check()
+    # Reuse the king constraints for terminal detection and tactical moves.
+    context = board._move_context()
+    _, _, king_square, evasion, _ = context
+    in_check = evasion is not None if king_square is not None else board.is_check()
+    legal_moves = board._legal_moves(context=context)
+    first = next(legal_moves, None)
+    if first is None:
+        return -MATE_SCORE + ply if in_check else 0
+    if board.automatic_draw_reason() is not None:
+        return 0
     if remaining == 0:
         # Avoid treating a missing evasion search as a reliable static score.
         return 0 if in_check else eval.evaluate(board)
     if in_check:
         best_score = -float("inf")
-        moves = evasions
+        moves = chain((first,), legal_moves)
     else:
         best_score = eval.evaluate(board)
         if best_score >= beta:
             return best_score
         alpha = max(alpha, best_score)
-        moves = board._legal_moves(tactical_only=True)
+        moves = board._legal_moves(tactical_only=True, context=context)
 
     for move in sorted(moves, key=board._tactical_priority, reverse=True):
         board._push(move)
