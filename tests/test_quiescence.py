@@ -16,6 +16,20 @@ HORIZON_TRAP = "4k3/8/4p3/3r4/8/8/8/3QK3 w - - 0 1"
 
 
 class QuiescenceTests(unittest.TestCase):
+    def test_legal_move_probe_with_and_without_free_pawn_pushes(self):
+        for fen in (
+            chess.STARTING_FEN,
+            chess.STARTING_FEN.replace(" w ", " b "),
+            "8/8/8/8/3b4/8/1Pk5/K1n5 w - - 0 1",
+            "7k/P7/8/8/8/8/8/K7 w - - 0 1",
+            "7k/6Q1/6K1/8/8/8/8/8 b - - 0 1",
+            "4r1k1/8/8/8/8/8/8/4K3 w - - 0 1",
+        ):
+            with self.subTest(fen=fen):
+                board = ChessBoard(fen)
+                expected = bool(chess.Board(fen).legal_moves)
+                self.assertEqual(board._has_legal_move(board._move_context()), expected)
+
     def test_sees_the_recapture_beyond_nominal_depth(self):
         board = ChessBoard(HORIZON_TRAP)
         self.assertEqual(negamax_alpha_beta_top(board, 1)[0], "d1d5")

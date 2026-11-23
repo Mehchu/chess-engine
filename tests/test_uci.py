@@ -3,11 +3,44 @@ import subprocess
 import sys
 import threading
 import unittest
+from io import StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from time import monotonic
+from unittest.mock import patch
 
 import chess
+
+from chess_engine.board_representation import ChessBoard
+from chess_engine.search_algorithms import SearchStopped
+from chess_engine.uci import UciEngine
+
+
+class AspirationTests(unittest.TestCase):
+    def test_retries_both_window_edges_before_reporting_depth(self):
+        output = StringIO()
+        with patch("chess_engine.uci.negamax_alpha_beta_top", side_effect=[
+            ("e2e4", 0), ("e2e4", 0), ("a2a3", -40),
+            ("b2b3", 40), ("d2d4", 5),
+        ]) as search:
+            UciEngine(output)._search(ChessBoard(chess.STARTING_FEN), {"depth": 3}, None)
+        self.assertEqual([call.args[1] for call in search.call_args_list], [1, 2, 3, 3, 3])
+        initial, after_low, after_high = [call.args[2:] for call in search.call_args_list[2:]]
+        self.assertLess(after_low[0], initial[0])
+        self.assertGreater(after_high[1], after_low[1])
+        self.assertEqual(len([line for line in output.getvalue().splitlines()
+                              if line.startswith("info depth 3 ")]), 1)
+        self.assertTrue(output.getvalue().endswith("bestmove d2d4\n"))
+
+    def test_stop_during_retry_keeps_last_completed_iteration(self):
+        output = StringIO()
+        with patch("chess_engine.uci.negamax_alpha_beta_top", side_effect=[
+            ("e2e4", 0), ("d2d4", 0), ("a2a3", 50), SearchStopped(),
+        ]) as search:
+            UciEngine(output)._search(ChessBoard(chess.STARTING_FEN), {"depth": 3}, None)
+        self.assertEqual(search.call_count, 4)
+        self.assertNotIn("info depth 3 ", output.getvalue())
+        self.assertTrue(output.getvalue().endswith("bestmove d2d4\n"))
 
 
 class UciTests(unittest.TestCase):

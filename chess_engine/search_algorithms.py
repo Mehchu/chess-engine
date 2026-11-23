@@ -3,8 +3,9 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum, auto
 from itertools import chain
+from math import nextafter
 
-from .board_representation import Move, move_to_uci
+from .board_representation import PAWN, Move, move_to_uci
 from .evaluation_functions import EvaluationFunction
 from .notation_handling import decompose_notation
 from .zobrist import ZOBRIST, ZobristHash as ZobristHash
@@ -25,6 +26,7 @@ class SearchControl:
 
     should_stop: Callable[[], bool] | None = None
     nodes: int = 0
+    killers: dict[int, Move] | None = None
 
     def visit(self):
         if self.should_stop is not None and self.should_stop():
@@ -195,7 +197,13 @@ def _alpha_beta(board, depth, alpha, beta, ply, table, control, quiescence, pref
     return move, score
 
 
-def _ordered_moves(board, preferred, context):
+def _is_quiet(board, move):
+    start, end, promotion = move
+    return (promotion is None and not board.occupancy & (1 << end)
+            and (end != board.en_passant or not board._boards[PAWN] & (1 << start)))
+
+
+def _ordered_moves(board, preferred, context, killer=None):
     side, enemy, *_ = context
     if preferred is not None and board._legal_candidate(preferred, side, enemy):
         yield preferred
@@ -206,8 +214,14 @@ def _ordered_moves(board, preferred, context):
     for move in sorted(tactical, key=board._tactical_priority, reverse=True):
         if move != preferred:
             yield move
+
+    if (killer is not None and killer != preferred and _is_quiet(board, killer)
+            and board._legal_candidate(killer, side, enemy)):
+        yield killer
+    else:
+        killer = None
     for move in board._legal_moves(quiet_only=True, context=context):
-        if move != preferred:
+        if move != preferred and move != killer:
             yield move
 
 
@@ -215,8 +229,10 @@ def _search_node(board, depth, alpha, beta, ply, table, control, quiescence, pre
     if depth == 0 and quiescence:
         return None, _quiescence(board, alpha, beta, ply, control)
 
+    killers = control.killers if quiescence and control is not None else None
     if quiescence:
-        ordered = _ordered_moves(board, preferred, board._move_context())
+        killer = killers.get(ply) if killers is not None else None
+        ordered = _ordered_moves(board, preferred, board._move_context(), killer)
         first = next(ordered, None)
         if first is None:
             return None, -MATE_SCORE + ply if board.is_check() else 0
@@ -234,9 +250,18 @@ def _search_node(board, depth, alpha, beta, ply, table, control, quiescence, pre
     for move in moves:
         board._push(move)
         try:
+            # With a likely best move already searched, test whether this
+            # sibling can improve alpha before searching it at full width.
+            scout_beta = beta
+            if quiescence and depth > 1 and best_move is not None:
+                scout_beta = nextafter(alpha, beta)
             _, child_score = _alpha_beta(
-                board, depth - 1, -beta, -alpha, ply + 1, table, control, quiescence
+                board, depth - 1, -scout_beta, -alpha, ply + 1, table, control, quiescence
             )
+            if scout_beta < beta and alpha < -child_score < beta:
+                _, child_score = _alpha_beta(
+                    board, depth - 1, -beta, -alpha, ply + 1, table, control, quiescence
+                )
         finally:
             board.undo_move()
 
@@ -245,6 +270,8 @@ def _search_node(board, depth, alpha, beta, ply, table, control, quiescence, pre
             best_move, best_score = move, score
         alpha = max(alpha, score)
         if alpha >= beta:
+            if killers is not None and _is_quiet(board, move):
+                killers[ply] = move
             break
     return best_move, best_score
 
@@ -254,10 +281,13 @@ def _quiescence(board, alpha, beta, ply, control, remaining=MAX_QUIESCENCE_PLIES
     context = board._move_context()
     _, _, king_square, evasion, _ = context
     in_check = evasion is not None if king_square is not None else board.is_check()
-    legal_moves = board._legal_moves(context=context)
-    first = next(legal_moves, None)
-    if first is None:
-        return -MATE_SCORE + ply if in_check else 0
+    if in_check:
+        legal_moves = board._legal_moves(context=context)
+        first = next(legal_moves, None)
+        if first is None:
+            return -MATE_SCORE + ply
+    elif not board._has_legal_move(context):
+        return 0
     if board.automatic_draw_reason() is not None:
         return 0
     if remaining == 0:

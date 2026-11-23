@@ -1,8 +1,10 @@
 import unittest
 from unittest.mock import patch
 
-from chess_engine.board_representation import ChessBoard, move_to_uci
+from chess_engine import search_algorithms
+from chess_engine.board_representation import ChessBoard
 from chess_engine.fen_handling import STARTING_FEN
+from chess_engine.notation_handling import decompose_notation
 from chess_engine.search_algorithms import (
     SearchControl,
     SearchStopped,
@@ -14,6 +16,22 @@ from chess_engine.search_algorithms import (
 
 
 class StagedMoveTests(unittest.TestCase):
+    def test_killer_is_tried_once_in_the_quiet_stage(self):
+        fen = "4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 1"
+        board = ChessBoard(fen)
+        capture = decompose_notation("e5d6")
+        killer = decompose_notation("e1f1")
+        all_moves = list(board._legal_moves())
+        for preferred, hint in ((None, killer), (killer, killer), (None, capture),
+                                (None, (0, 63, None))):
+            with self.subTest(preferred=preferred, hint=hint):
+                ordered = list(_ordered_moves(board, preferred, board._move_context(), hint))
+                self.assertCountEqual(ordered, all_moves)
+                if preferred is None:
+                    self.assertEqual(ordered[0], capture)
+                if hint == killer:
+                    self.assertEqual(ordered[0 if preferred else 1], killer)
+
     def test_partitions_special_moves_without_gaps_or_duplicates(self):
         for fen in (
             "r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1",
@@ -49,10 +67,10 @@ class StagedMoveTests(unittest.TestCase):
         preferred, _ = negamax_alpha_beta_top(board, 2, table=table, quiescence=True)
         internal_hints = []
 
-        def record(position, hint, context):
+        def record(position, hint, context, killer=None):
             if position.previous_positions and hint is not None:
                 internal_hints.append(hint)
-            return _ordered_moves(position, hint, context)
+            return _ordered_moves(position, hint, context, killer)
 
         with patch("chess_engine.search_algorithms._ordered_moves", side_effect=record):
             result = negamax_alpha_beta_top(
@@ -105,3 +123,31 @@ class IncrementalHashTests(unittest.TestCase):
         self.assertIsNone(board._zobrist_key)
         self.assertEqual(board.to_fen(), fen)
         self.assertEqual(board.previous_positions, history)
+
+
+class PrincipalVariationSearchTests(unittest.TestCase):
+    def test_researches_a_better_move_at_full_width(self):
+        board = ChessBoard(STARTING_FEN)
+        original = search_algorithms._alpha_beta
+        windows = {}
+
+        def record(position, depth, alpha, beta, ply, *args):
+            if ply == 1:
+                windows.setdefault(position.to_fen(), []).append((alpha, beta))
+            return original(position, depth, alpha, beta, ply, *args)
+
+        with patch.object(search_algorithms, "_alpha_beta", side_effect=record):
+            move, score = negamax_alpha_beta_top(
+                board, 2, table=TranspositionTable(), quiescence=True, preferred_move="a2a3"
+            )
+
+        self.assertNotEqual(move, "a2a3")
+        self.assertFalse(board.previous_positions)
+        self.assertEqual(board.to_fen(), STARTING_FEN)
+        board.make_move(move)
+        self.assertEqual(score, -negamax_alpha_beta_top(board, 1, quiescence=True)[1])
+        calls = windows[board.to_fen()]
+        self.assertEqual(len(calls), 2)
+        scout, full = calls
+        self.assertLess(scout[1] - scout[0], 1)
+        self.assertLess(full[0], scout[0])

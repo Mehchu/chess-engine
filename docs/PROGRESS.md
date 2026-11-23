@@ -256,3 +256,27 @@ bounded evaluation caches, which are warm after the first run.
 - In a separate before/after comparison, the median iterative search through depth four fell from 241 to 127 ms at the starting position and from 1,194 to 1,033 ms on Kiwipete. Both returned the same moves and scores.
 - Tested two exchange-ordering prototypes for quiescence. The first searched legal recaptures on the contested square. A faster prototype used occupancy and least-valuable attackers as an ordering estimate. They saved about 24 to 25% of Kiwipete's quiescence nodes but increased elapsed time. The faster one took 294 ms versus 277 ms with the current ordering, so the current ordering remains the default.
 - All 79 tests passed. Staged move sets matched python-chess and incremental keys matched recomputation across 1,200 seeded positions and undo. Starting-position depth-five perft returned 4,865,609.
+
+### Quiet ordering, search windows, and quiescence
+
+- UCI searches remember one quiet beta-cutoff move per ply across iterative-deepening passes. The staged search verifies its legality and tries it after captures and promotions. A separate history-table prototype helped some positions, with mixed timings against the single-move approach.
+- Principal variation search probes later siblings with a narrow window above depth one and re-searches when the result can improve alpha without cutting off. UCI starts from a 35-centipawn window around the previous score from depth three, except for previous mate scores. A retry shares the original node and clock budget. A stop during a retry returns the last completed iteration's move.
+- Quiescence can establish that a position has a legal move from an unobstructed pawn push when the king is free of checks and pins. Other positions use full legal generation. Checked nodes still enumerate evasions, and stalemate still returns a draw.
+- The baseline Kiwipete profile spent 80% of profiled time in quiescence, including its callees. Transposition key construction accounted for 1.3% there and 4.3% in the fixture with twelve reversible plies. The position-only hint prototype found zero extra hints in 86 fallback probes on Kiwipete and 364 on the reversible-history fixture. It and an alternative tuple-construction prototype produced no consistent speed gain. The existing depth and draw-history checks still govern score reuse.
+
+Compared with `c3dc78c`, both builds returned the same scores at every
+iteration and the same final moves across five alternating benchmark runs.
+Node counts include all iterations and retries.
+
+| Position | Depth | Median before → after | Nodes before → after |
+| --- | ---: | ---: | ---: |
+| Starting position | 5 | 447 → 275 ms | 21,511 → 14,934 |
+| Kiwipete | 4 | 884 → 733 ms | 43,540 → 40,268 |
+| Middlegame | 4 | 807 → 615 ms | 34,268 → 28,700 |
+| Rook endgame | 5 | 140 → 85 ms | 6,835 → 4,624 |
+| Starting position after 12 reversible plies | 5 | 450 → 363 ms | 21,511 → 14,934 |
+
+- All 84 tests passed, and the benchmark confirmed 197,281 starting-position perft nodes at depth four and 97,862 Kiwipete nodes at depth three. On 62 seeded playout positions, completed depth-two and depth-three searches matched the baseline scores and returned optimal legal moves. The same playouts compared the legal-move existence probe against python-chess.
+- The baseline and candidate played 16 colour-swapped UCI games at 35 ms per move. The candidate completed depth four or higher on 285 of 874 moves (33%), compared with 212 of 873 (24%) for the baseline. The candidate won three and lost two. Eleven games reached the 120-ply limit, leaving one complete pair at one win each. The match establishes a completed-depth gain at this budget, with too few finished games to estimate a strength change.
+- Late-move reductions remain deferred until a larger timed match and tactical corpus establish a baseline.
+- Suggested commit `perf: improve UCI search ordering and quiescence throughput`.

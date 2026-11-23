@@ -28,6 +28,7 @@ class PieceType(Enum):
 
 PAWN, KNIGHT, BISHOP, ROOK, QUEEN, KING = (piece.value for piece in PieceType)
 PROMOTIONS = "qrbn"
+BOARD_MASK = (1 << 64) - 1
 BACK_RANKS = 0xFF000000000000FF
 DARK_SQUARES = 0xAA55AA55AA55AA55
 Move = tuple[int, int, str | None]
@@ -498,6 +499,18 @@ class ChessBoard:
                 continue
             if (evasion is None and pin is None) or self._keeps_king_safe(move, side, enemy):
                 yield move
+
+    def _has_legal_move(self, context):
+        """Prove a simple pawn push exists or fall back to legal generation."""
+        side, _, king_square, evasion, pins = context
+        if king_square is not None and evasion is None and not pins:
+            pawns = self._boards[PAWN] & self._boards[side]
+            pushes = (pawns << 8) & BOARD_MASK if side == WHITE else pawns >> 8
+            if self.en_passant is not None:
+                pushes &= ~(1 << self.en_passant)
+            if pushes & ~self.occupancy:
+                return True
+        return next(self._legal_moves(context=context), None) is not None
 
     def _tactical_priority(self, move):
         """Order captures by victim value first, then attacker value."""

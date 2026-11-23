@@ -80,6 +80,26 @@ def _score_text(score):
     return f"mate {moves if score > 0 else -moves}"
 
 
+def _search_iteration(board, depth, previous_score, preferred_move, table, control):
+    alpha, beta = -float("inf"), float("inf")
+    margin = 35
+    if depth >= 3 and abs(previous_score) < MATE_THRESHOLD:
+        alpha, beta = previous_score - margin, previous_score + margin
+
+    while True:
+        move, score = negamax_alpha_beta_top(
+            board, depth, alpha, beta, table=table, control=control,
+            quiescence=True, preferred_move=preferred_move,
+        )
+        if alpha < score < beta:
+            return move, score
+        if score <= alpha:
+            alpha -= margin
+        else:
+            beta += margin
+        margin *= 2
+
+
 class UciEngine:
     def __init__(self, output):
         self.board = ChessBoard(STARTING_FEN)
@@ -112,14 +132,15 @@ class UciEngine:
                     or (deadline is not None and monotonic_ns() >= deadline)
                     or (node_limit is not None and control.nodes >= node_limit))
 
-        control = SearchControl(should_stop=should_stop)
+        # Share quiet cutoff moves across iterations of this search.
+        control = SearchControl(should_stop=should_stop, killers={})
         table = TranspositionTable()
         depths = count(1) if max_depth is None else range(1, max_depth + 1)
+        score = 0
         try:
             for depth in depths:
-                move, score = negamax_alpha_beta_top(
-                    board, depth, table=table, control=control, quiescence=True,
-                    preferred_move=best_move if depth > 1 else None
+                move, score = _search_iteration(
+                    board, depth, score, best_move if depth > 1 else None, table, control
                 )
                 if move not in moves:
                     raise RuntimeError(f"Search returned an illegal root move: {move}")
