@@ -3,6 +3,7 @@ from itertools import islice
 
 from .fen_handling import CASTLING, FenPosition, InvalidFEN, display_chess_position, parse_fen
 from .notation_handling import decompose_notation, encode_square
+from .zobrist import ZOBRIST
 
 WHITE, BLACK = 6, 7
 ORTHOGONAL = ((-1, 0), (1, 0), (0, -1), (0, 1))
@@ -186,11 +187,12 @@ class ChessBoard:
         self.en_passant = position.en_passant
         self.halfmove_clock = position.halfmove_clock
         self.fullmove_number = position.fullmove_number
+        self._zobrist_key = position.zobrist_key
 
     def _snapshot(self):
         return FenPosition(
             tuple(self._boards), self.white_to_move, self.castling_rights,
-            self.en_passant, self.halfmove_clock, self.fullmove_number,
+            self.en_passant, self.halfmove_clock, self.fullmove_number, self._zobrist_key,
         )
 
     @property
@@ -239,16 +241,20 @@ class ChessBoard:
             raise GameOver()
         move = decompose_notation(notation)
         side, enemy = (WHITE, BLACK) if self.white_to_move else (BLACK, WHITE)
-        if move not in self._candidates(side, enemy) or not self._keeps_king_safe(move, side, enemy):
+        if not self._legal_candidate(move, side, enemy):
             raise ValueError(f"Illegal move: {notation}")
         self._push(move)
+
+    def _legal_candidate(self, move, side, enemy):
+        return (move in self._candidates(side, enemy, source=move[0])
+                and self._keeps_king_safe(move, side, enemy))
 
     def _capture_mask(self, end, end_mask, is_pawn, side):
         if is_pawn and end == self.en_passant and not self.occupancy & end_mask:
             return 1 << (end - 8 if side == WHITE else end + 8)
         return end_mask
 
-    def _push(self, move):
+    def _push(self, move, *, update_hash=True):
         """Apply a generated legal move without validating it again."""
         start, end, promotion = move
         start_mask, end_mask = 1 << start, 1 << end
@@ -256,7 +262,9 @@ class ChessBoard:
         piece = self._piece_type(start_mask)
         capture_mask = self._capture_mask(end, end_mask, piece == PAWN, side)
         captured = self._piece_type(capture_mask) if self._boards[enemy] & capture_mask else None
-        self.previous_positions.append(self._snapshot())
+        previous = self._snapshot()
+        self.previous_positions.append(previous)
+        rook_move = 0
 
         if captured is not None:
             self._boards[captured] &= ~capture_mask
@@ -282,6 +290,10 @@ class ChessBoard:
         self.halfmove_clock = 0 if piece == PAWN or captured is not None else self.halfmove_clock + 1
         self.fullmove_number += side == BLACK
         self.white_to_move = not self.white_to_move
+        if previous.zobrist_key is not None:
+            self._zobrist_key = ZOBRIST.after_move(
+                previous, self, side == BLACK, piece, placed, start, end, captured, capture_mask, rook_move
+            ) if update_hash else None
 
     def undo_move(self):
         self._restore(self.previous_positions.pop())
@@ -330,16 +342,19 @@ class ChessBoard:
         king = self._boards[KING] & self._boards[side]
         return bool(king and self._attacked(king.bit_length() - 1, enemy, self.occupancy))
 
-    def _pawn_targets(self, square, side, enemy, tactical_only):
+    def _pawn_targets(self, square, side, enemy, tactical_only, quiet_only):
         forward, double, captures = PAWN_GEOMETRY[side][square]
         occupied = self.occupancy
         if forward is not None:
             mask, moves = forward
-            if (not tactical_only or moves[0][2] is not None) and not occupied & mask:
+            is_promotion = moves[0][2] is not None
+            if (not tactical_only or is_promotion) and (not quiet_only or not is_promotion) and not occupied & mask:
                 yield from moves
                 if double is not None and not occupied & double[0]:
                     yield from double[1]
 
+        if quiet_only:
+            return
         enemy_pieces = self._boards[enemy]
         targets = enemy_pieces & ~self._boards[KING]
         for target, mask, moves in captures:
@@ -367,13 +382,18 @@ class ChessBoard:
             if not self._attacked(home + step, enemy, self.occupancy):
                 yield home, home + 2 * step, None
 
-    def _candidates(self, side, enemy, *, tactical_only=False):
+    def _candidates(self, side, enemy, *, tactical_only=False, quiet_only=False, source=None):
+        own = self._boards[side]
         enemy_king = self._boards[enemy] & self._boards[KING]
-        allowed = (self._boards[enemy] if tactical_only else ~self._boards[side]) & ~enemy_king
-        for square in _squares(self._boards[side]):
+        if quiet_only:
+            allowed = ~self.occupancy
+        else:
+            allowed = (self._boards[enemy] if tactical_only else ~own) & ~enemy_king
+        sources = own if source is None else own & (1 << source)
+        for square in _squares(sources):
             piece = self._piece_type(1 << square)
             if piece == PAWN:
-                yield from self._pawn_targets(square, side, enemy, tactical_only)
+                yield from self._pawn_targets(square, side, enemy, tactical_only, quiet_only)
                 continue
             if piece == KNIGHT:
                 targets = KNIGHT_TARGETS[square]
@@ -450,12 +470,12 @@ class ChessBoard:
         evasion, pins = self._king_constraints(king_square, side, enemy)
         return side, enemy, king_square, evasion, pins
 
-    def _legal_moves(self, *, tactical_only=False, context=None):
+    def _legal_moves(self, *, tactical_only=False, quiet_only=False, context=None):
         # A caller may reuse the context for another pass over the same position.
         side, enemy, king_square, evasion, pins = (
             self._move_context() if context is None else context
         )
-        moves = self._candidates(side, enemy, tactical_only=tactical_only)
+        moves = self._candidates(side, enemy, tactical_only=tactical_only, quiet_only=quiet_only)
         if king_square is None:
             for move in moves:
                 if self._keeps_king_safe(move, side, enemy):

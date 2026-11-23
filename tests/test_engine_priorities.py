@@ -73,10 +73,10 @@ class SearchPriorityTests(unittest.TestCase):
         original_push = board._push
         root_moves = []
 
-        def track(move):
+        def track(move, **kwargs):
             if not board.previous_positions:
                 root_moves.append(move_to_uci(move))
-            return original_push(move)
+            return original_push(move, **kwargs)
 
         with patch.object(board, "_push", side_effect=track):
             _, score = negamax_alpha_beta_top(board, 2, quiescence=True, preferred_move="g1f3")

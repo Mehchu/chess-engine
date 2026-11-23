@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 
@@ -25,6 +25,7 @@ class FenPosition:
     en_passant: int | None
     halfmove_clock: int
     fullmove_number: int
+    zobrist_key: int | None = field(default=None, compare=False, repr=False)
 
     def to_fen(self) -> str:
         placement = _format_placement(self.piece_boards)

@@ -3,11 +3,11 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum, auto
 from itertools import chain
-from random import Random
 
 from .board_representation import Move, move_to_uci
 from .evaluation_functions import EvaluationFunction
 from .notation_handling import decompose_notation
+from .zobrist import ZOBRIST, ZobristHash as ZobristHash
 
 MATE_SCORE = 100_000
 MATE_THRESHOLD = 90_000
@@ -32,37 +32,6 @@ class SearchControl:
         self.nodes += 1
 
 
-class ZobristHash:
-    """Recompute a 64-bit key from piece placement and rule state."""
-
-    def __init__(self):
-        rng = Random(0x5A4F4252495354)
-        self._pieces = tuple(
-            tuple(tuple(rng.getrandbits(64) for _ in range(64)) for _ in range(6))
-            for _ in range(2)
-        )
-        self._black_to_move = rng.getrandbits(64)
-        self._castling = tuple(rng.getrandbits(64) for _ in range(16))
-        self._en_passant = tuple(rng.getrandbits(64) for _ in range(64))
-
-    def generate_key(self, board):
-        boards = board.piece_bitboards
-        key = self._castling[board.castling_rights]
-        if not board.white_to_move:
-            key ^= self._black_to_move
-        # Keep the raw FEN target, even when no legal capture is available.
-        if board.en_passant is not None:
-            key ^= self._en_passant[board.en_passant]
-        for colour, occupancy in enumerate(boards[6:]):
-            for piece, piece_mask in enumerate(boards[:6]):
-                mask = occupancy & piece_mask
-                while mask:
-                    bit = mask & -mask
-                    key ^= self._pieces[colour][piece][bit.bit_length() - 1]
-                    mask ^= bit
-        return key
-
-
 class Bound(Enum):
     EXACT = auto()
     LOWER = auto()
@@ -79,11 +48,11 @@ class TranspositionEntry:
 class TranspositionTable:
     """Bound the number of exact-depth cache entries with FIFO eviction."""
 
-    def __init__(self, max_entries=32_768):
+    def __init__(self, max_entries=32_768, *, incremental_hash=True):
         if not isinstance(max_entries, int) or max_entries < 1:
             raise ValueError("The table requires at least one entry")
         self._max_entries = max_entries
-        self._hasher = ZobristHash()
+        self.incremental_hash = incremental_hash
         self._entries = OrderedDict()
 
     def __len__(self):
@@ -96,7 +65,10 @@ class TranspositionTable:
             (position.piece_boards, position.white_to_move, position.en_passant)
             for position in board.reversible_history()
         )
-        return self._hasher.generate_key(board), board.halfmove_clock, history, quiescence
+        key = board._zobrist_key if self.incremental_hash else None
+        if key is None:
+            key = ZOBRIST.generate_key(board)
+        return key, board.halfmove_clock, history, quiescence
 
     def lookup(self, key, depth):
         # Different horizons can yield different fixed-depth scores.
@@ -173,7 +145,13 @@ def negamax_alpha_beta_top(
     if not alpha < beta:
         raise ValueError("Alpha must be less than beta")
     preferred = decompose_notation(preferred_move) if preferred_move is not None else None
-    move, score = _alpha_beta(board, depth, alpha, beta, 0, table, control, quiescence, preferred)
+    original_key = board._zobrist_key
+    if table is not None and table.incremental_hash and original_key is None:
+        board._zobrist_key = ZOBRIST.generate_key(board)
+    try:
+        move, score = _alpha_beta(board, depth, alpha, beta, 0, table, control, quiescence, preferred)
+    finally:
+        board._zobrist_key = original_key
     return (move_to_uci(move) if move is not None else None), score
 
 
@@ -201,6 +179,11 @@ def _alpha_beta(board, depth, alpha, beta, ply, table, control, quiescence, pref
                 or (entry.bound is Bound.UPPER and score <= alpha)):
             return entry.move, score
 
+    if quiescence and depth > 0 and preferred is None:
+        hint = entry if entry is not None and entry.move is not None else table.lookup(key, depth - 1)
+        if hint is not None:
+            preferred = hint.move
+
     move, score = _search_node(board, depth, alpha, beta, ply, table, control, quiescence, preferred)
     if score <= alpha:
         bound = Bound.UPPER
@@ -212,21 +195,40 @@ def _alpha_beta(board, depth, alpha, beta, ply, table, control, quiescence, pref
     return move, score
 
 
+def _ordered_moves(board, preferred, context):
+    side, enemy, *_ = context
+    if preferred is not None and board._legal_candidate(preferred, side, enemy):
+        yield preferred
+    else:
+        preferred = None
+
+    tactical = board._legal_moves(tactical_only=True, context=context)
+    for move in sorted(tactical, key=board._tactical_priority, reverse=True):
+        if move != preferred:
+            yield move
+    for move in board._legal_moves(quiet_only=True, context=context):
+        if move != preferred:
+            yield move
+
+
 def _search_node(board, depth, alpha, beta, ply, table, control, quiescence, preferred):
     if depth == 0 and quiescence:
         return None, _quiescence(board, alpha, beta, ply, control)
 
-    moves, score = _moves_or_score(board, depth, ply)
-    if score is not None:
-        return None, score
-
-    if preferred is not None:
-        def priority(move):
-            return move == preferred, board._tactical_priority(move) if quiescence else 0
-
-        moves = sorted(moves, key=priority, reverse=True)
-    elif quiescence:
-        moves = sorted(moves, key=board._tactical_priority, reverse=True)
+    if quiescence:
+        ordered = _ordered_moves(board, preferred, board._move_context())
+        first = next(ordered, None)
+        if first is None:
+            return None, -MATE_SCORE + ply if board.is_check() else 0
+        if board.automatic_draw_reason() is not None:
+            return None, 0
+        moves = chain((first,), ordered)
+    else:
+        moves, score = _moves_or_score(board, depth, ply)
+        if score is not None:
+            return None, score
+        if preferred is not None:
+            moves = sorted(moves, key=lambda move: move == preferred, reverse=True)
 
     best_move, best_score = None, -float("inf")
     for move in moves:
@@ -272,7 +274,7 @@ def _quiescence(board, alpha, beta, ply, control, remaining=MAX_QUIESCENCE_PLIES
         moves = board._legal_moves(tactical_only=True, context=context)
 
     for move in sorted(moves, key=board._tactical_priority, reverse=True):
-        board._push(move)
+        board._push(move, update_hash=False)
         try:
             if control is not None:
                 control.visit()

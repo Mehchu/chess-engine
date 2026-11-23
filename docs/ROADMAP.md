@@ -118,6 +118,27 @@ Use `python -m benchmark --quiescence` to measure the active leaf policy.
 - Move generation filters checks and king pins before testing moves, and tactical sliders jump to their first blocker. Projected occupancy verifies king moves, en passant, and candidates that survive check and pin restrictions. Seeded python-chess comparisons and perft cover the fast path.
 - The transposition table is bounded at 32,768 entries by default and evicts the oldest entry first. Slotted snapshots keep the complete undo state with a smaller object footprint. In the cached Kiwipete profile, cache keys cost about 4% of execution time and snapshots and restores together cost under 3%. Incremental keys and delta undo remain candidates if deeper profiles justify the added state.
 
+## 14. Performance experiments after the depth-four review (tested)
+
+1. Stage move generation so a preferred or forcing move can cut off before
+   quiet candidates are generated. Record searched versus generated moves,
+   fixed-depth scores, and completed depth under equal time limits.
+2. Carry previous-iteration move hints below the root. Keep a move-ordering
+   hint independent of score reuse so exact-depth and repetition constraints
+   continue to govern cutoffs.
+3. Prototype incremental Zobrist updates against full recomputation on every
+   make and undo. Measure cached search on both tactical and quiet positions
+   before changing leaf-cache coverage.
+4. Measure quiescence node counts by position and test static exchange
+   ordering separately. Keep all legal check evasions in the baseline.
+
+See the [depth-four profile and cache experiment](PROGRESS.md#depth-four-performance-review).
+
+Staged generation, internal move hints, and incremental keys are active.
+Exchange-based ordering reduced nodes but cost more wall time in both
+prototypes, so the current capture ordering remains in use.
+See the [implementation results](PROGRESS.md#staged-generation-search-hints-and-incremental-keys).
+
 ## Suggested commit boundaries
 
 - `chore: add runtime and development dependency files`
@@ -138,3 +159,4 @@ Use `python -m benchmark --quiescence` to measure the active leaf policy.
 - `fix: validate playable positions and adjudicate basic material draws`
 - `perf: prioritise the previous best move and filter legal candidates`
 - `perf: bound transposition entries and compact position snapshots`
+- `perf: stage legal moves and reuse search hints and hashes`
